@@ -58,7 +58,10 @@ until a repository bumps its pin.
 ## Bumping asdf
 
 `ASDF_VERSION` in the Dockerfile carries a matching `ASDF_SHA256`, which
-Renovate cannot compute. A version bump has to bring a new checksum with it:
+Renovate cannot compute: a checksum is not a version, and no datasource
+publishes it as one. Renovate still proposes the version bump, with a note in
+the pull request saying the checksum is missing, and that pull request is
+never automerged. Finish it by recomputing the checksum and pushing it:
 
 ```shell
 curl -fsSL https://github.com/asdf-vm/asdf/releases/download/v<version>/asdf-v<version>-linux-amd64.tar.gz \

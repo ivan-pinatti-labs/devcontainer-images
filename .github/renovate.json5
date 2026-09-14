@@ -184,6 +184,42 @@
       groupSlug: "pre-commit-hooks",
       labels: ["dependencies", "pre-commit"],
     },
+    {
+      matchManagers: ["dockerfile"],
+      groupName: "base image",
+      groupSlug: "base-image",
+      labels: ["dependencies", "docker"],
+    },
+
+    // Which Ubuntu release line the base image sits on is a decision, not a
+    // version bump, and the patch-and-minor automerge rule above would
+    // otherwise take it unattended: Renovate grades 26.04 to 26.10 a minor
+    // update, and 26.10 is a nine month release rather than an LTS. Only a
+    // digest update automerges here, which is the same tag rebuilt with
+    // security fixes and is exactly what the weekly rebuild wants.
+    {
+      matchManagers: ["dockerfile"],
+      matchUpdateTypes: ["minor", "major"],
+      automerge: false,
+    },
+
+    // ASDF_VERSION and ASDF_SHA256 in images/base/Dockerfile are two halves
+    // of one pin, and Renovate can only move the first: a checksum is not a
+    // version, and no datasource publishes it as one. So a bump arrives
+    // deliberately incomplete, the build fails on the mismatch (which is the
+    // verification working, not a flake), and a person finishes it. Never
+    // automerged for that reason, and the note says so in the pull request
+    // itself rather than only here.
+    {
+      matchManagers: ["custom.regex"],
+      matchDepNames: ["asdf-vm/asdf"],
+      automerge: false,
+      labels: ["dependencies", "tooling"],
+      prBodyNotes: [
+        "`ASDF_SHA256` in `images/base/Dockerfile` is **not** updated by this pull request, because Renovate cannot compute an archive checksum. Recompute it and push the new value before merging, or the build fails on the mismatch:",
+        "```shell\ncurl -fsSL https://github.com/asdf-vm/asdf/releases/download/v<version>/asdf-v<version>-linux-amd64.tar.gz | sha256sum\n```",
+      ],
+    },
 
     // The github-actions manager extracts more than uses: pins by default:
     // pull-request.yml's python-version: "3.12" passed to
