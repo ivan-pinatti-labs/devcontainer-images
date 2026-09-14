@@ -96,7 +96,12 @@ RUN curl -fsSL -o /tmp/asdf.tar.gz \
 RUN usermod --login dev --home /home/dev --move-home ubuntu \
   && groupmod --new-name dev ubuntu
 
-USER dev
+# Numeric rather than 'dev', which is the same account: hadolint's DL3066
+# asks for a uid here because a name only means something to a runtime that
+# reads this image's own /etc/passwd, while a uid is what the host actually
+# sees on a bind mounted file. HOME is set explicitly for the same reason,
+# rather than left to the runtime's passwd lookup.
+USER 1000:1000
 
 # Where a repository's checkout is expected to be mounted. Nothing is copied
 # into the image: this is a development environment, not a build of any one
@@ -105,7 +110,8 @@ WORKDIR /workspace
 
 # asdf resolves tools through its shims directory, which has to be on PATH
 # before anything a repository pins can be found.
-ENV ASDF_DATA_DIR=/home/dev/.asdf \
+ENV HOME=/home/dev \
+    ASDF_DATA_DIR=/home/dev/.asdf \
     PATH=/home/dev/.asdf/shims:/home/dev/.asdf/bin:/usr/local/bin:/usr/bin:/bin
 RUN mkdir -p "${ASDF_DATA_DIR}"
 
