@@ -1,24 +1,38 @@
-# REPLACE_ME_PROJECT_NAME
+# devcontainer-images
 
-> REPLACE_ME_ONE_LINE_DESCRIPTION
+> Container images for developing and running the ivan-pinatti-labs
+> repositories, built and scanned in CI and consumed by digest.
 > Apache License 2.0. Author: Ivan Pinatti (https://github.com/ivan-pinatti).
-> Canonical repository: https://github.com/REPLACE_ME_OWNER/REPLACE_ME_REPO_NAME
+> Canonical repository: https://github.com/ivan-pinatti-labs/devcontainer-images
 
 ## What it does
 
-This file is a placeholder generated from the `github-template` template
-repository. Fill it in once you know what the new project actually does,
-following the shape below, or delete it if you do not want an `llms.txt`
-in your project.
+Carries one shared base image with the tooling every repository in the
+organization needs (git, the GitHub CLI, pre-commit, a version manager and
+the scanners), so work on those repositories happens inside a container
+rather than on the host. A repository needing more than the base adds a thin
+layer of its own on top. Images are built, linted, scanned and signed in CI,
+published to the GitHub Container Registry, and consumed by digest so a
+rebuild never changes what a repository builds against without a commit.
+
+Nothing is published yet: this repository currently carries the scaffolding,
+and the base image plus its build pipeline land next.
 
 ## Key files
 
 - [README.md](README.md): Pitch, quickstart, and usage
-- REPLACE_ME_WITH_YOUR_KEY_FILES_AND_A_SHORT_DESCRIPTION_OF_EACH
+- [AGENTS.md](AGENTS.md): Instructions for AI coding agents and contributors,
+  imported by [CLAUDE.md](CLAUDE.md)
+- [docs/MERGE_PIPELINE.md](docs/MERGE_PIPELINE.md): How a pull request gets
+  from opened to merged here
+- [.pre-commit-config.yaml](.pre-commit-config.yaml): The checklists and
+  hooks every change runs through
 
 ## Tech stack
 
-- REPLACE_ME_WITH_YOUR_LANGUAGES_AND_TOOLS
+- Container images built and run with Podman (rootless), Docker compatible
+- GitHub Actions for building, scanning, signing and publishing to GHCR
+- pre-commit, hadolint, gitleaks and Trivy for the local and CI checks
 
 ## Conventions
 
