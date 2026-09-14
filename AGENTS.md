@@ -1,4 +1,4 @@
-# github-template agent instructions
+# devcontainer-images agent instructions
 
 Instructions for AI coding agents working in this repository. Claude Code
 reads them through `CLAUDE.md`; Codex and CodeRabbit read this file
@@ -77,18 +77,22 @@ and identifiers are fine.
 
 ## What this repository is
 
-A GitHub template repository: the starting point for a new project, with
-pre-commit, dependency automation, review automation, the merge pipeline and
-the community files already wired up.
+The container images the other `ivan-pinatti-labs` repositories are developed
+and run inside. One shared base image carries the tooling common to all of
+them; a repository needing more adds a thin layer on top of it.
 
-- Everything here is copied into a new repository once, when it is created.
-  A change reaches only repositories created afterwards. Existing
-  repositories carry their own copies of these files (`docs/MERGE_PIPELINE.md`,
-  the workflows, `scripts/`), so a fix here usually needs the same change in
-  each of them.
-- `REPLACE_ME` placeholders stay placeholders. They are what "Using this
-  template" in `README.md` tells a new repository's owner to fill in.
-- Keep the steps in "Using this template" in step with the files they
-  describe. `docs/STARTER_README.md` becomes a new repository's `README.md`.
-- In a repository created from this template, replace this section with that
-  project's own specifics and keep "Organization conventions" unchanged.
+Nothing is published yet. This repository currently carries the scaffolding
+it was created with, and the base image plus its build pipeline land next.
+
+- An image is consumed by digest, never by a floating tag, so a rebuild
+  cannot change what a repository builds against without a commit saying so.
+- Every published image is linted (hadolint), scanned and signed, and ships
+  an SBOM. A secret found in a layer blocks the publish. Vulnerabilities are
+  reported rather than blocking, except a critical one with a fix available,
+  which blocks the base image.
+- Rebuilds on a schedule pick up upstream security fixes. They publish a new
+  digest and cut no release, so nothing consumes them until a repository
+  bumps its pin.
+- The images are built and run with rootless Podman. Anything that assumes a
+  daemon, a privileged container or a Docker socket needs saying out loud in
+  the pull request, because the organization's rule is least privilege.
