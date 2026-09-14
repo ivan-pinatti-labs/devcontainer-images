@@ -47,7 +47,9 @@ pull request is then the record that the environment changed.
    then. That is the one class where blocking is actionable: the fix is a
    rebuild away.
 5. Publishes to the GitHub Container Registry, with an SBOM and provenance
-   attached, on everything except a pull request.
+   attached, and only from `main`. The gate is the branch rather than "not a
+   pull request": `workflow_dispatch` runs against whatever ref it is
+   launched from, so a weaker condition would let a feature branch publish.
 
 The weekly rebuild exists because step 4's "a rebuild away" has to actually
 happen. It publishes a new digest and cuts no release, so nothing consumes it

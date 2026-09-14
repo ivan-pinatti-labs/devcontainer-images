@@ -28,7 +28,12 @@
   // it entirely to fall back to config:recommended's own defaults, once it
   // has something else for Renovate to watch; see README.md's "Using this
   // template" step 5.
-  extends: ["config:recommended"],
+  // customManagers:dockerfileVersions is what reads the `# renovate:`
+  // annotation above ARG ASDF_VERSION in images/base/Dockerfile. Neither the
+  // dockerfile manager (which only sees FROM lines) nor asdf extracts an
+  // annotated ARG, so without this preset that pin would sit unwatched while
+  // the config looked like it covered the file.
+  extends: ["config:recommended", "customManagers:dockerfileVersions"],
 
   // Kept on despite the standing, never-resolving tracking issue it opens.
   // Without it, "Renovate found nothing to update" and "Renovate silently
@@ -81,7 +86,16 @@
   // together. It cannot touch ASDF_SHA256, which is a checksum rather than a
   // version, so an asdf bump is a pull request a person finishes by hand;
   // docs/IMAGES.md says how.
-  enabledManagers: ["asdf", "github-actions", "pre-commit", "dockerfile"],
+  // custom.regex is listed because enabledManagers is an explicit allow list:
+  // the preset in extends above defines a custom manager, and a manager this
+  // list does not name stays off however it was defined.
+  enabledManagers: [
+    "asdf",
+    "github-actions",
+    "pre-commit",
+    "dockerfile",
+    "custom.regex",
+  ],
 
   // Renovate's pre-commit manager ships disabled by its own default even
   // when named in enabledManagers above (confirmed with
