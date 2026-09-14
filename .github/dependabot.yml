@@ -123,12 +123,27 @@ updates:
         patterns:
           - "*"
 
-  # Add an ecosystem block for whatever this project actually depends on
-  # once you know its language, for example:
-  #
-  # - package-ecosystem: "REPLACE_ME_ECOSYSTEM" # npm, pip, docker, ...
-  #   directory: "/"
-  #   schedule:
-  #     interval: weekly
-  #   labels:
-  #     - dependencies
+  # Covers the FROM line in images/base/Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/images/base"
+    schedule:
+      interval: daily
+      time: "06:00"
+      timezone: "America/Toronto"
+    # Same seven day cooldown as the blocks above, and the same
+    # default-days-only reasoning; see their comments.
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    # 0: disabled, exactly like the two ecosystems above. Renovate's
+    # dockerfile manager (renovate.json5) is the active bot for this surface,
+    # and it has the property Dependabot lacks here: it moves the tag and the
+    # digest of a pinned FROM together. Raising this back to 5 means removing
+    # "dockerfile" from renovate.json5's enabledManagers in the same change,
+    # or both bots open competing pull requests for the same base image.
+    open-pull-requests-limit: 0

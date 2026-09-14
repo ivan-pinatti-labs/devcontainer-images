@@ -146,6 +146,15 @@ repos:
         files: ^scripts/.*\.py$
         stages: [pre-commit]
 
+      # Lints the image definitions with hadolint. hadolint-docker runs in a
+      # container through pre-commit's docker_image language, which shells
+      # out to the `docker` binary specifically and does not accept Podman in
+      # its place. checklist-github-actions below already carries that same
+      # requirement (actionlint-docker), so this adds no dependency a clone
+      # able to run these hooks did not already need.
+      - id: checklist-dev-docker
+        stages: [pre-commit]
+
   # CITATION.cff is the one file here that no checklist reaches. It is YAML,
   # but `identify` tags it only `text`, since the tag comes from the extension
   # and `.cff` is not one it knows. Widening checklist-yaml's `types:`

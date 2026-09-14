@@ -68,14 +68,20 @@
   // person rather than merging on the strength of a default nobody chose.
   automerge: false,
 
-  // The three pin surfaces this repository actually has. asdf covers
+  // The four pin surfaces this repository actually has. asdf covers
   // .tool-versions; github-actions covers every uses: SHA pin under
-  // .github/workflows/; pre-commit covers .pre-commit-config.yaml's rev:.
-  // github-actions and pre-commit are also configured, disabled, in
+  // .github/workflows/; pre-commit covers .pre-commit-config.yaml's rev:;
+  // dockerfile covers the base image tag and digest in images/base/Dockerfile.
+  // github-actions, pre-commit and docker are also configured, disabled, in
   // dependabot.yml; see the file header above. Dropping either manager
   // from this list is the other half of switching that ecosystem back to
   // Dependabot, alongside raising its open-pull-requests-limit there.
-  enabledManagers: ["asdf", "github-actions", "pre-commit"],
+  //
+  // The dockerfile manager updates the tag and the digest of the FROM line
+  // together. It cannot touch ASDF_SHA256, which is a checksum rather than a
+  // version, so an asdf bump is a pull request a person finishes by hand;
+  // docs/IMAGES.md says how.
+  enabledManagers: ["asdf", "github-actions", "pre-commit", "dockerfile"],
 
   // Renovate's pre-commit manager ships disabled by its own default even
   // when named in enabledManagers above (confirmed with
