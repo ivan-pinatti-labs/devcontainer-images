@@ -41,34 +41,48 @@ docker-torrent-box-with-vpn's whole stack. The image carries rootless Podman
 for that, plus a `docker` command that runs it, because pre-commit's
 `docker_image` hooks call `docker` by name.
 
-It only works when the development container is started with:
+It works when the development container runs in `container_engine_t`, the
+confined SELinux domain meant for running a container engine inside a
+container:
 
 ```shell
---security-opt label=disable --device /dev/fuse
+--security-opt label=type:container_engine_t --device /dev/fuse
 ```
 
-That is opt in, per repository, on purpose. Without those flags nesting fails
-and SELinux keeps confining the development container, which is the default
-this organization wants: a repository whose tooling never starts a container
-has no reason to weaken it. A repository that does need nesting adds the
-flags to its own devcontainer.json, next to a comment naming the tool that
-needs them.
+**SELinux stays enforcing.** This is not `label=disable`: the development
+container is still confined, cannot see host paths that are not mounted into
+it, and the host still masks its `/proc` and `/sys`. Without these flags the
+container runs in the default `container_t` domain and nesting fails, so a
+repository whose tooling never starts a container keeps the stricter default.
+A repository that needs nesting adds the flags to its own devcontainer.json.
 
-- `label=disable` turns off SELinux labeling for that one development
-  container. `label=nested`, which would keep it on, was tried first and
-  fails on an SELinux enforcing host (`crun: mount devpts to dev/pts:
-  Permission denied`, measured 2026-09-15), including when the nested
-  container disables labeling itself.
-- `/dev/fuse` is what fuse-overlayfs, the nested storage driver, needs.
-- Nested containers share the development container's network namespace
-  (`images/base/containers/containers.conf`). That is enough for hooks;
-  a stack with its own networks and a VPN is still to be proven.
+Why each piece, all measured on 2026-09-15 on an SELinux enforcing host:
 
-Verified on 2026-09-15 with rootless Podman on the host, both with and
-without `--userns=keep-id`: a nested container runs through the `docker`
-command, a hadolint run shaped like pre-commit's own (a bind mounted working
-tree and `--user` passed through) lints its file, and the same nested run
-without the flags fails.
+- **`container_engine_t`, not the default `container_t`.** `container_t`
+  refuses the mounts a nested runtime makes (a new devpts, then mount
+  propagation on `/dev/null`). `label=nested` leaves the domain unchanged, so
+  it fails the same way.
+- **The crun wrapper** (`images/base/containers/crun-without-masked-paths`).
+  `container_engine_t` allows those mounts but refuses the tmpfs mounts podman
+  uses to mask directories such as `/proc/acpi`, and no podman option can
+  unmask all of them. The wrapper removes masked paths from each nested
+  container's spec. A nested container then sees the same `/proc` and `/sys`
+  as the development container, which the host has already masked, and
+  nothing more.
+- **`/dev/fuse`** is what fuse-overlayfs, the nested storage driver, needs.
+- **Nested containers share the development container's network namespace**
+  (`images/base/containers/containers.conf`). That is enough for hooks and
+  test suites; a stack with its own networks and a VPN is still to be proven.
+- **Anything a development container connects to over a socket runs in the
+  same domain and SELinux category.** A process in `container_engine_t` could
+  not connect to an ssh-agent running in `container_t`, and could connect to
+  one in `container_engine_t` at the same category.
+
+Verified with rootless Podman on the host, with and without
+`--userns=keep-id`: a nested container runs through the `docker` command, a
+hadolint run shaped like pre-commit's own (a bind mounted working tree and
+`--user` passed through) lints its file, and the same nested run without the
+flags fails.
 
 ## What the build does
 

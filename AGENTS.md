@@ -97,9 +97,11 @@ what it carries, how a repository consumes it, and how the build works.
   repository opts in to nesting (docs/IMAGES.md, "Running containers inside
   it").
 - Nesting is opt in per repository, never a default of the image: the
-  `--security-opt label=disable --device /dev/fuse` flags go in that
-  repository's own devcontainer.json, with a comment saying which of its
-  tools needs them.
+  `--security-opt label=type:container_engine_t --device /dev/fuse` flags go
+  in that repository's own devcontainer.json, and its documentation says
+  which of its tools needs them. SELinux stays enforcing: never reach for
+  `label=disable` to make nesting work, and never loosen the
+  crun-without-masked-paths wrapper beyond removing masked paths.
 - Rebuilds on a schedule pick up upstream security fixes. They publish a new
   digest and cut no release, so nothing consumes them until a repository
   bumps its pin.
