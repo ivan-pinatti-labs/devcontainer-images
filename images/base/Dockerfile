@@ -147,12 +147,14 @@ RUN sed -i '/^ubuntu:/d' /etc/subuid /etc/subgid \
     --add-subgids 1-999 --add-subgids 1001-65535 \
     dev
 
-# Configuration for the nested runtime; each file explains itself. The
-# nodocker marker silences podman-docker's "Emulate Docker CLI using podman"
-# notice, which it otherwise prints on every `docker` call, into the output
-# of every hook that makes one.
+# Configuration for the nested runtime, plus the crun wrapper that lets it
+# work in a confined SELinux domain; each file explains itself. The nodocker
+# marker silences podman-docker's "Emulate Docker CLI using podman" notice,
+# which it otherwise prints on every `docker` call, into the output of every
+# hook that makes one.
 COPY containers/ /tmp/containers/
 RUN install -m 0644 /tmp/containers/containers.conf /tmp/containers/storage.conf /etc/containers/ \
+  && install -D -m 0755 /tmp/containers/crun-without-masked-paths /usr/local/libexec/devcontainer/crun \
   && install -d -o 1000 -g 1000 /home/dev/.config /home/dev/.config/containers \
   && install -m 0644 -o 1000 -g 1000 /tmp/containers/user-containers.conf /home/dev/.config/containers/containers.conf \
   && touch /etc/containers/nodocker \
