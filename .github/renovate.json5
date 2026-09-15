@@ -28,7 +28,12 @@
   // it entirely to fall back to config:recommended's own defaults, once it
   // has something else for Renovate to watch; see README.md's "Using this
   // template" step 5.
-  extends: ["config:recommended"],
+  // customManagers:dockerfileVersions is what reads the `# renovate:`
+  // annotation above ARG ASDF_VERSION in images/base/Dockerfile. Neither the
+  // dockerfile manager (which only sees FROM lines) nor asdf extracts an
+  // annotated ARG, so without this preset that pin would sit unwatched while
+  // the config looked like it covered the file.
+  extends: ["config:recommended", "customManagers:dockerfileVersions"],
 
   // Kept on despite the standing, never-resolving tracking issue it opens.
   // Without it, "Renovate found nothing to update" and "Renovate silently
@@ -68,14 +73,29 @@
   // person rather than merging on the strength of a default nobody chose.
   automerge: false,
 
-  // The three pin surfaces this repository actually has. asdf covers
+  // The four pin surfaces this repository actually has. asdf covers
   // .tool-versions; github-actions covers every uses: SHA pin under
-  // .github/workflows/; pre-commit covers .pre-commit-config.yaml's rev:.
-  // github-actions and pre-commit are also configured, disabled, in
+  // .github/workflows/; pre-commit covers .pre-commit-config.yaml's rev:;
+  // dockerfile covers the base image tag and digest in images/base/Dockerfile.
+  // github-actions, pre-commit and docker are also configured, disabled, in
   // dependabot.yml; see the file header above. Dropping either manager
   // from this list is the other half of switching that ecosystem back to
   // Dependabot, alongside raising its open-pull-requests-limit there.
-  enabledManagers: ["asdf", "github-actions", "pre-commit"],
+  //
+  // The dockerfile manager updates the tag and the digest of the FROM line
+  // together. It cannot touch ASDF_SHA256, which is a checksum rather than a
+  // version, so an asdf bump is a pull request a person finishes by hand;
+  // docs/IMAGES.md says how.
+  // custom.regex is listed because enabledManagers is an explicit allow list:
+  // the preset in extends above defines a custom manager, and a manager this
+  // list does not name stays off however it was defined.
+  enabledManagers: [
+    "asdf",
+    "github-actions",
+    "pre-commit",
+    "dockerfile",
+    "custom.regex",
+  ],
 
   // Renovate's pre-commit manager ships disabled by its own default even
   // when named in enabledManagers above (confirmed with
@@ -163,6 +183,55 @@
       groupName: "pre-commit hooks",
       groupSlug: "pre-commit-hooks",
       labels: ["dependencies", "pre-commit"],
+    },
+    {
+      matchManagers: ["dockerfile"],
+      groupName: "base image",
+      groupSlug: "base-image",
+      labels: ["dependencies", "docker"],
+    },
+
+    // Which Ubuntu release line the base image sits on is a decision, not a
+    // version bump, and the patch-and-minor automerge rule above would
+    // otherwise take it unattended: Renovate grades 26.04 to 26.10 a minor
+    // update, and 26.10 is a nine month release rather than an LTS.
+    {
+      matchManagers: ["dockerfile"],
+      matchUpdateTypes: ["minor", "major"],
+      automerge: false,
+    },
+
+    // digest is its own update type in Renovate, matched by neither the
+    // patch-and-minor rule above nor the minor-and-major one, so without
+    // this it would fall through to the repository-wide `automerge: false`
+    // default and wait for a person every week. It is the one base image
+    // update that should merge on its own: the same tag, rebuilt upstream
+    // with security fixes, which is precisely what the scheduled rebuild
+    // exists to pick up, and it still has to pass Pin Only and the build
+    // and scan job first.
+    {
+      matchManagers: ["dockerfile"],
+      matchUpdateTypes: ["digest"],
+      automerge: true,
+      addLabels: ["automerge"],
+    },
+
+    // ASDF_VERSION and ASDF_SHA256 in images/base/Dockerfile are two halves
+    // of one pin, and Renovate can only move the first: a checksum is not a
+    // version, and no datasource publishes it as one. So a bump arrives
+    // deliberately incomplete, the build fails on the mismatch (which is the
+    // verification working, not a flake), and a person finishes it. Never
+    // automerged for that reason, and the note says so in the pull request
+    // itself rather than only here.
+    {
+      matchManagers: ["custom.regex"],
+      matchDepNames: ["asdf-vm/asdf"],
+      automerge: false,
+      labels: ["dependencies", "tooling"],
+      prBodyNotes: [
+        "`ASDF_SHA256` in `images/base/Dockerfile` is **not** updated by this pull request, because Renovate cannot compute an archive checksum. Recompute it and push the new value before merging, or the build fails on the mismatch:",
+        "```shell\ncurl -fsSL https://github.com/asdf-vm/asdf/releases/download/v<version>/asdf-v<version>-linux-amd64.tar.gz | sha256sum\n```",
+      ],
     },
 
     // The github-actions manager extracts more than uses: pins by default:

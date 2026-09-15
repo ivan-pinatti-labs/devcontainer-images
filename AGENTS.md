@@ -81,15 +81,18 @@ The container images the other `ivan-pinatti-labs` repositories are developed
 and run inside. One shared base image carries the tooling common to all of
 them; a repository needing more adds a thin layer on top of it.
 
-Nothing is published yet. This repository currently carries the scaffolding
-it was created with, and the base image plus its build pipeline land next.
+`images/base/` is the shared base image; docs/IMAGES.md is the reference for
+what it carries, how a repository consumes it, and how the build works.
 
 - An image is consumed by digest, never by a floating tag, so a rebuild
   cannot change what a repository builds against without a commit saying so.
-- Every published image is linted (hadolint), scanned and signed, and ships
-  an SBOM. A secret found in a layer blocks the publish. Vulnerabilities are
-  reported rather than blocking, except a critical one with a fix available,
-  which blocks the base image.
+- Every published image is linted (hadolint, through the pre-commit hooks)
+  and scanned, and ships an SBOM and build provenance. A secret found in a
+  layer blocks the publish. Vulnerabilities are reported rather than
+  blocking, except a critical one with a fix available, which blocks.
+- The base image carries only what every repository needs. A tool one
+  repository pins belongs in that repository's `.tool-versions`, installed
+  in a layer on top, not here.
 - Rebuilds on a schedule pick up upstream security fixes. They publish a new
   digest and cut no release, so nothing consumes them until a repository
   bumps its pin.

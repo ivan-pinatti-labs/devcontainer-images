@@ -15,9 +15,10 @@ what it needs, rather than on the host.
 
 ## Status
 
-Nothing is published yet. This repository currently carries the scaffolding
-it was created with. The base image and its build pipeline land next, and
-this README grows a real quickstart when they do.
+The base image and its pipeline are here; the first publish happens when
+this lands on `main`. [docs/IMAGES.md](docs/IMAGES.md) is the reference for
+what the image carries, how a repository consumes it and what the build
+checks.
 
 ## Requirements
 
@@ -40,10 +41,10 @@ FROM ghcr.io/ivan-pinatti-labs/devcontainer-base@sha256:<digest>
 ## How images are built
 
 Every published image is linted with hadolint, scanned for secrets and
-vulnerabilities, signed, and ships a software bill of materials. A secret
-found in a layer blocks the publish. Vulnerabilities are reported rather than
-blocking, with one exception: a critical one carrying a fix blocks the base
-image. Scheduled rebuilds pick up upstream security fixes and publish a new
+vulnerabilities, and ships a software bill of materials and build provenance.
+A secret found in a layer blocks the publish. Vulnerabilities are reported
+rather than blocking, with one exception: a critical one carrying a fix
+blocks. Scheduled rebuilds pick up upstream security fixes and publish a new
 digest without cutting a release.
 
 ## License

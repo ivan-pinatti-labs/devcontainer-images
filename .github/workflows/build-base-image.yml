@@ -1,0 +1,168 @@
+---
+name: Base Image
+
+# Builds, scans and publishes the shared base development image.
+#
+# The order is build, scan, then publish, rather than the push-to-staging and
+# promote shape rsync-crypt's publish-image.yml uses. That repository
+# publishes to two registries and builds two platforms, so a staging tag
+# earns its keep there; here a single-platform image loaded into the local
+# daemon can be scanned before anything reaches a registry at all, which is
+# the property that matters: a gate that runs after the push has already
+# published what it was meant to stop.
+#
+# A pull request builds and scans but never publishes, so a fork cannot push
+# an image and a contributor still finds out whether their change builds.
+
+on:
+  pull_request:
+    paths:
+      - images/**
+      - .github/workflows/build-base-image.yml
+  push:
+    branches: [main]
+    paths:
+      - images/**
+      - .github/workflows/build-base-image.yml
+  # Upstream security fixes land in Ubuntu's own packages, not in this
+  # repository, so nothing here would ever rebuild to pick them up without a
+  # schedule. Weekly rather than daily: the apt upgrade in the Dockerfile is
+  # what collects them, and a daily rebuild would republish a near-identical
+  # digest six extra times a week for nothing.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/ivan-pinatti-labs/devcontainer-base
+
+jobs:
+  build:
+    name: Build and scan the base image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Writing the scan results into this repository's code scanning tab.
+      security-events: write
+      # Pushing to GHCR. Harmless on a pull request, where the publish step
+      # below does not run at all.
+      packages: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Nothing here pushes commits, and a checkout that leaves the
+          # token in .git/config hands it to every later step.
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Tags are computed here rather than written out by hand so the
+      # published image carries both a moving 'latest' and an immutable
+      # commit-specific tag. Consumers are told to pin by digest either way
+      # (docs/IMAGES.md); the tags exist for humans reading the package page.
+      - name: Compute the image tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+
+      # Loaded, not pushed: every gate below runs against this exact image
+      # before anything reaches the registry.
+      - name: Build the image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: images/base
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Secrets block, always. A credential baked into a layer is published
+      # the moment the image is, and unlike a CVE there is nothing to weigh
+      # up: it is a defect in this repository's own content.
+      - name: Fail on secrets baked into the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:ci
+          version: v0.74.0
+          scanners: secret
+          format: table
+          exit-code: "1"
+
+      # Vulnerabilities are reported rather than blocking: an upstream CVE
+      # with no fix available is not something a rebuild can clear, and a
+      # gate that cannot be satisfied gets bypassed rather than fixed.
+      - name: Scan the image for known vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:ci
+          version: v0.74.0
+          scanners: vuln
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload the scan to code scanning
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-base
+
+      # The one vulnerability class worth blocking on, and the reason the
+      # weekly rebuild above exists: critical, and a fixed version already
+      # published upstream. 'ignore-unfixed' is what separates this from the
+      # report-only scan; without it this step would block on exactly the
+      # findings nobody can act on.
+      - name: Fail on fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:ci
+          version: v0.74.0
+          scanners: vuln
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # Gated on the branch rather than on "not a pull request".
+      # workflow_dispatch runs against whichever ref it is launched from and
+      # actions/checkout takes that same ref, so excluding only pull requests
+      # would let anyone able to dispatch this workflow build a feature
+      # branch's images/base and publish it with this job's packages: write.
+      # push and schedule both carry refs/heads/main, so this costs nothing
+      # the pipeline actually needs.
+      - name: Log in to the GitHub Container Registry
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Re-running the build to push is a cache hit on every layer the
+      # scanned build just produced, so this publishes the image the gates
+      # above passed rather than a second, separately built one. It is also
+      # where the SBOM and provenance attestations get attached, which
+      # buildx only does for a pushed image.
+      - name: Publish the image
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: images/base
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          sbom: true
+          provenance: mode=max
