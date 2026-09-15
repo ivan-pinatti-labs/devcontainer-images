@@ -194,13 +194,26 @@
     // Which Ubuntu release line the base image sits on is a decision, not a
     // version bump, and the patch-and-minor automerge rule above would
     // otherwise take it unattended: Renovate grades 26.04 to 26.10 a minor
-    // update, and 26.10 is a nine month release rather than an LTS. Only a
-    // digest update automerges here, which is the same tag rebuilt with
-    // security fixes and is exactly what the weekly rebuild wants.
+    // update, and 26.10 is a nine month release rather than an LTS.
     {
       matchManagers: ["dockerfile"],
       matchUpdateTypes: ["minor", "major"],
       automerge: false,
+    },
+
+    // digest is its own update type in Renovate, matched by neither the
+    // patch-and-minor rule above nor the minor-and-major one, so without
+    // this it would fall through to the repository-wide `automerge: false`
+    // default and wait for a person every week. It is the one base image
+    // update that should merge on its own: the same tag, rebuilt upstream
+    // with security fixes, which is precisely what the scheduled rebuild
+    // exists to pick up, and it still has to pass Pin Only and the build
+    // and scan job first.
+    {
+      matchManagers: ["dockerfile"],
+      matchUpdateTypes: ["digest"],
+      automerge: true,
+      addLabels: ["automerge"],
     },
 
     // ASDF_VERSION and ASDF_SHA256 in images/base/Dockerfile are two halves
