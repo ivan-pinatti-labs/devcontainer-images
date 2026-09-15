@@ -7,8 +7,10 @@
   `ghcr.io/ivan-pinatti-labs/devcontainer-base`.
 
 The base image carries what every repository in the organization needs and
-nothing that only one of them needs: git, asdf, and the tools asdf's plugins
-depend on to fetch and verify their releases.
+nothing that only one of them needs: git, asdf, the tools asdf's plugins
+depend on to fetch and verify their releases, and rootless Podman for the
+repositories whose tooling starts containers of its own (see "Running
+containers inside it" below).
 
 It deliberately does **not** carry github-cli, pre-commit or nodejs, even
 though nearly every repository pins those. They belong to a repository's own
@@ -30,6 +32,43 @@ By digest, never by a floating tag. A tag would let a rebuild change the
 toolchain under a checkout with no commit saying so, which is the failure the
 digest pin exists to prevent. Renovate can keep the digest current, and its
 pull request is then the record that the environment changed.
+
+## Running containers inside it
+
+Most of these repositories start containers from inside their development
+container: pre-commit's `hadolint-docker` and `actionlint-docker` hooks, and
+docker-torrent-box-with-vpn's whole stack. The image carries rootless Podman
+for that, plus a `docker` command that runs it, because pre-commit's
+`docker_image` hooks call `docker` by name.
+
+It only works when the development container is started with:
+
+```shell
+--security-opt label=disable --device /dev/fuse
+```
+
+That is opt in, per repository, on purpose. Without those flags nesting fails
+and SELinux keeps confining the development container, which is the default
+this organization wants: a repository whose tooling never starts a container
+has no reason to weaken it. A repository that does need nesting adds the
+flags to its own devcontainer.json, next to a comment naming the tool that
+needs them.
+
+- `label=disable` turns off SELinux labeling for that one development
+  container. `label=nested`, which would keep it on, was tried first and
+  fails on an SELinux enforcing host (`crun: mount devpts to dev/pts:
+  Permission denied`, measured 2026-09-15), including when the nested
+  container disables labeling itself.
+- `/dev/fuse` is what fuse-overlayfs, the nested storage driver, needs.
+- Nested containers share the development container's network namespace
+  (`images/base/containers/containers.conf`). That is enough for hooks;
+  a stack with its own networks and a VPN is still to be proven.
+
+Verified on 2026-09-15 with rootless Podman on the host, both with and
+without `--userns=keep-id`: a nested container runs through the `docker`
+command, a hadolint run shaped like pre-commit's own (a bind mounted working
+tree and `--user` passed through) lints its file, and the same nested run
+without the flags fails.
 
 ## What the build does
 
