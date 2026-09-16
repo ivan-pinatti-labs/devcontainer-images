@@ -50,6 +50,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   crun catatonit   the OCI runtime podman uses, and the init it runs under
 #   fuse-overlayfs   the nested storage driver (see containers/storage.conf)
 #   passt            rootless container networking
+#   nftables         the firewall rules netavark writes for a nested bridge
+#                    network; unused unless a repository opts in to one
 #   uidmap           newuidmap and newgidmap, which hand nested containers
 #                    their range of user ids
 #   libcap2-bin      setcap, used once below
@@ -74,6 +76,7 @@ RUN apt-get update \
     jq \
     libcap2-bin \
     make \
+    nftables \
     openssh-client \
     passt \
     podman \
@@ -155,6 +158,7 @@ RUN sed -i '/^ubuntu:/d' /etc/subuid /etc/subgid \
 COPY containers/ /tmp/containers/
 RUN install -m 0644 /tmp/containers/containers.conf /tmp/containers/storage.conf /etc/containers/ \
   && install -D -m 0755 /tmp/containers/crun-without-masked-paths /usr/local/libexec/devcontainer/crun \
+  && install -D -m 0644 /tmp/containers/containers-bridge-network.conf /usr/local/share/devcontainer/containers-bridge-network.conf \
   && install -d -o 1000 -g 1000 /home/dev/.config /home/dev/.config/containers \
   && install -m 0644 -o 1000 -g 1000 /tmp/containers/user-containers.conf /home/dev/.config/containers/containers.conf \
   && touch /etc/containers/nodocker \

@@ -1,0 +1,23 @@
+module devcontainer_nested_devices 1.0;
+
+# Host SELinux policy for development containers that pass a FUSE or TUN
+# device on to the containers they start. See docs/IMAGES.md, "Devices for
+# nested containers", for when it is needed and how to install it.
+#
+# A development container running in container_engine_t already holds
+# /dev/fuse and /dev/net/tun, and may read and write them. What the stock
+# policy refuses is bind mounting either device node into a nested container
+# (crun: "set propagation for `dev/fuse`: Permission denied", AVC
+# "denied { mounton } ... tclass=chr_file", measured 2026-09-15). This allows
+# exactly that and nothing else: no other domain, no other device, no other
+# permission. container_t, which ordinary containers run in, is unaffected.
+
+require {
+  type container_engine_t;
+  type fuse_device_t;
+  type tun_tap_device_t;
+  class chr_file mounton;
+}
+
+allow container_engine_t fuse_device_t:chr_file mounton;
+allow container_engine_t tun_tap_device_t:chr_file mounton;

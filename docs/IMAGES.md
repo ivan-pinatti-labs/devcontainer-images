@@ -70,9 +70,11 @@ Why each piece, all measured on 2026-09-15 on an SELinux enforcing host:
   as the development container, which the host has already masked, and
   nothing more.
 - **`/dev/fuse`** is what fuse-overlayfs, the nested storage driver, needs.
-- **Nested containers share the development container's network namespace**
-  (`images/base/containers/containers.conf`). That is enough for hooks and
-  test suites; a stack with its own networks and a VPN is still to be proven.
+- **Nested containers share the development container's network namespace
+  by default** (`images/base/containers/containers.conf`). That is enough for
+  hooks and for test suites whose containers do not talk to each other. A
+  repository that needs more opts in to it; see "Nested containers with a
+  network of their own" below.
 - **Anything a development container connects to over a socket runs in the
   same domain and SELinux category.** A process in `container_engine_t` could
   not connect to an ssh-agent running in `container_t`, and could connect to
@@ -83,6 +85,73 @@ Verified with rootless Podman on the host, with and without
 hadolint run shaped like pre-commit's own (a bind mounted working tree and
 `--user` passed through) lints its file, and the same nested run without the
 flags fails.
+
+### Nested containers with a network of their own
+
+Some tooling needs nested containers that reach each other by address:
+rsync-crypt's test suite starts an sshd container and connects to its IP, and
+a compose stack has networks of its own. A repository that needs that adds
+two more run arguments:
+
+```shell
+--device /dev/net/tun --security-opt unmask=/proc/sys
+```
+
+and makes a bridge network the nested default, in its devcontainer.json:
+
+```json
+"containerEnv": {
+  "CONTAINERS_CONF_OVERRIDE": "/usr/local/share/devcontainer/containers-bridge-network.conf"
+}
+```
+
+Measured on 2026-09-15:
+
+- With the default shared namespace, a nested container has no address of
+  its own (`podman inspect` reports none).
+- `--network=bridge` without the two arguments fails in turn: silently
+  without `/dev/net/tun`, which pasta needs to set up rootless networking;
+  then with `netavark: set sysctl net/ipv4/ip_forward: Read-only file system`,
+  because the runtime mounts `/proc/sys` read only and netavark writes the
+  setting even when it already holds the right value, so `--sysctl` on the
+  development container does not help; then with
+  `unable to execute "nft"`, which is why the image carries nftables.
+- With both arguments, a nested container got an address on the bridge,
+  a second nested container reached it there, and both reached the internet.
+
+What `unmask=/proc/sys` exposes, measured as root of the dev account's user
+namespace (where nested podman runs): every `kernel`, `vm` and `fs` setting is
+still refused, and so are the network settings of the development
+container's own namespace. Only the network settings inside a namespace that
+user created itself can be written, which is what netavark needs and all it
+gets.
+
+### Devices for nested containers
+
+A FUSE mount inside a nested container (rsync-crypt's gocryptfs and sshfs)
+and a VPN client (a TUN device) need the device passed on to that container.
+The development container holds both devices and may use them, but host
+policy refuses bind mounting either one into a nested container:
+`crun: set propagation for dev/fuse: Permission denied`, logged as
+`denied { mounton }` for `container_engine_t` on `fuse_device_t`
+(`tun_tap_device_t` for TUN). `label=disable` on the nested container does
+not change that, because the refusal is the host's.
+
+[host/selinux/devcontainer_nested_devices.te](../host/selinux/devcontainer_nested_devices.te)
+allows exactly that one permission, for `container_engine_t`, on those two
+device types. It is host setup, installed once by someone with root on that
+machine:
+
+```shell
+checkmodule -M -m -o devcontainer_nested_devices.mod host/selinux/devcontainer_nested_devices.te
+semodule_package -o devcontainer_nested_devices.pp -m devcontainer_nested_devices.mod
+sudo semodule -i devcontainer_nested_devices.pp
+```
+
+`sudo semodule -r devcontainer_nested_devices` removes it again. The
+`container_use_devices` boolean is not the alternative: it grants every
+container domain, including the ordinary `container_t` every other container
+on the machine runs in, access to every device node.
 
 ## What the build does
 

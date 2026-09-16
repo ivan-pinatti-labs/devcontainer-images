@@ -102,6 +102,13 @@ what it carries, how a repository consumes it, and how the build works.
   which of its tools needs them. SELinux stays enforcing: never reach for
   `label=disable` to make nesting work, and never loosen the
   crun-without-masked-paths wrapper beyond removing masked paths.
+- A nested network of its own (`--device /dev/net/tun`,
+  `--security-opt unmask=/proc/sys` and the bridge network override) and
+  devices passed on to nested containers (the host policy module under
+  `host/selinux/`) are further opt ins, for the repositories whose tooling
+  needs them, never defaults. Keep the module to the `mounton` permission it
+  grants today, and never suggest the `container_use_devices` boolean
+  instead: it widens every container domain on the machine.
 - Rebuilds on a schedule pick up upstream security fixes. They publish a new
   digest and cut no release, so nothing consumes them until a repository
   bumps its pin.
