@@ -111,9 +111,27 @@ RUN chmod 0755 /usr/bin/newuidmap /usr/bin/newgidmap \
 #
 # The keys are vendored under keyrings/ rather than downloaded here, so a
 # key changing is a diff somebody reviews in a pull request instead of
-# whatever the vendor served on the day of the build. Each one is checked
-# against the fingerprint below before it is dearmored, which is what makes
-# a tampered vendored file fail the build rather than ship.
+# whatever the vendor served on the day of the build.
+#
+# Each file's set of primary certificates is compared against the list
+# below, exactly: every expected fingerprint must be present and no
+# unexpected one may be. Checking only that the expected fingerprint is
+# somewhere in the file would be weaker than it looks, because `gpg
+# --dearmor` installs every certificate the file holds and apt then accepts
+# repository metadata signed by any of them. A vendor that quietly added a
+# second certificate, or a tampered file that appended one, would install a
+# signer nobody reviewed while the check still passed. CodeRabbit caught
+# exactly that on this file's first version (pull request 10).
+#
+# github-cli genuinely ships two primary certificates, which is why the
+# answer is an exact set rather than a single value: GitHub rotates by
+# publishing the new certificate alongside the old one, and pinning only one
+# of them would fail verification the day they switch.
+#
+# Subkeys are deliberately not listed. A subkey is bound to its primary by a
+# signature gpg already verifies, so naming the primaries fixes the whole
+# trust chain; listing subkeys too would only mean editing this file every
+# time a vendor rotated a signing subkey under an unchanged primary.
 #
 # Installing a key grants nothing on its own: apt reads a keyring only when
 # a sources.list entry names it with signed-by=. So this image trusts these
@@ -123,28 +141,33 @@ RUN chmod 0755 /usr/bin/newuidmap /usr/bin/newgidmap \
 # needs, the same way nesting is opt in per repository rather than a default
 # of the image. docs/TOOL_SOURCES.md has the exact lines.
 #
-# The fingerprint check is the last command in each pipeline rather than
+# The comparison is a plain string equality on the last command rather than
 # something guarded by pipefail: Podman's default OCI image format ignores
 # SHELL entirely (it warns and carries on), so a pipefail guard would hold
 # under Docker and quietly not under the runtime this organization actually
-# builds with. That is what DL4006 asks for below, and why it is ignored:
-# the grep is the last command in its pipeline, so its exit status is the
-# pipeline's, and a fingerprint that does not match fails the build with or
-# without pipefail. Verified by swapping a vendored key for a freshly
-# generated one and watching the build stop.
+# builds with. Verified by swapping a vendored key for a freshly generated
+# one, and again by appending an extra certificate, and watching the build
+# stop both times.
 COPY keyrings/ /tmp/keyrings/
 # hadolint ignore=DL4006
 RUN set -eu; \
   install -d -m 0755 /usr/share/keyrings; \
   for entry in \
-      "github-cli:2C6106201985B60E6C7AC87323F3D4EA75716059" \
+      "github-cli:2C6106201985B60E6C7AC87323F3D4EA75716059,7F38BBB59D064DBCB3D84D725612B36462313325" \
       "nodesource:6F71F525282841EEDAF851B42F59B5F99B1BE0B4" \
       "hashicorp:D55C0D1AC78A8D8126CB631CFC9CA96ACA026560"; do \
     name="${entry%%:*}"; \
     want="${entry#*:}"; \
-    gpg --show-keys --with-colons "/tmp/keyrings/${name}.asc" \
-      | awk -F: '/^fpr:/ { print $10 }' \
-      | grep -qx "${want}"; \
+    got="$( \
+      gpg --show-keys --with-colons "/tmp/keyrings/${name}.asc" \
+        | awk -F: '$1=="pub"{p=1;next} $1=="fpr"&&p{print $10;p=0;next} {p=0}' \
+        | sort \
+        | paste -sd, - \
+    )"; \
+    if [ "${got}" != "${want}" ]; then \
+      echo "${name}.asc: primary certificates ${got:-none} do not match the reviewed set ${want}" >&2; \
+      exit 1; \
+    fi; \
     gpg --dearmor < "/tmp/keyrings/${name}.asc" \
       > "/usr/share/keyrings/${name}.gpg"; \
     chmod 0644 "/usr/share/keyrings/${name}.gpg"; \

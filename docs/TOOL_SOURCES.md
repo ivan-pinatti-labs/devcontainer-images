@@ -1,6 +1,7 @@
 # Where the tools come from
 
-<!-- cspell:words nodesource keyrings dearmor dearmored enarmor gpgv dpkg nodistro pkgs pipx -->
+<!-- cspell:words nodesource keyrings dearmor dearmored enarmor gpgv -->
+<!-- cspell:words dpkg nodistro pkgs pipx subkey subkeys -->
 
 Every command line tool these repositories develop against, where it is
 installed from, and what actually vouches for it.
@@ -46,20 +47,39 @@ bump can merge.
 ## The keys
 
 The base image carries three third party apt signing keys, vendored under
-`images/base/keyrings/` and verified against these fingerprints at build
-time:
+`images/base/keyrings/`. Each file's set of **primary** certificates is
+compared against this list at build time, exactly: every fingerprint here
+must be present and no other may be.
 
-| Keyring | Fingerprint | Signs |
+| Keyring | Primary certificates | Signs |
 | --- | --- | --- |
-| `github-cli.gpg` | `2C6106201985B60E6C7AC87323F3D4EA75716059` | GitHub CLI |
+| `github-cli.gpg` | `2C6106201985B60E6C7AC87323F3D4EA75716059`, `7F38BBB59D064DBCB3D84D725612B36462313325` | GitHub CLI |
 | `nodesource.gpg` | `6F71F525282841EEDAF851B42F59B5F99B1BE0B4` | NodeSource Node.js |
 | `hashicorp.gpg` | `D55C0D1AC78A8D8126CB631CFC9CA96ACA026560` | HashiCorp Terraform |
 
+github-cli carries two because GitHub rotates by publishing the new
+certificate alongside the old one. Pinning only one of them would fail
+verification the day they switch, which is why the check is an exact set
+rather than a single value.
+
+Subkeys are deliberately not listed. A subkey is bound to its primary by a
+signature gpg already verifies, so naming the primaries fixes the whole
+trust chain, and listing subkeys as well would mean editing this file every
+time a vendor rotated a signing subkey under an unchanged primary.
+
+An exact set, rather than "the expected fingerprint appears somewhere in the
+file", because `gpg --dearmor` installs every certificate a file holds and
+apt then accepts repository metadata signed by any of them. A vendor quietly
+adding a second certificate, or a tampered file with one appended, would
+otherwise install a signer nobody reviewed while the check still passed.
+CodeRabbit caught precisely that on the first version of this change.
+
 They are vendored rather than downloaded during the build so that a key
 changing is a diff somebody reviews in a pull request, not whatever the
-vendor served on the day of the build. A file that does not match its
-fingerprint fails the build, which was verified by swapping one for a freshly
-generated key and watching the build stop.
+vendor served on the day of the build. Three failure modes were confirmed
+against a real build: replacing a key with a freshly generated one, adding a
+rogue certificate to an otherwise correct file, and removing one of the two
+reviewed GitHub certificates. All three stop the build.
 
 **Installing a key grants nothing on its own.** apt reads a keyring only when
 a `sources.list` entry names it with `signed-by=`. The base image ships the

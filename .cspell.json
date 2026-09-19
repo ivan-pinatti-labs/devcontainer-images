@@ -85,6 +85,8 @@
     "sshfs",
     "subgid",
     "subgids",
+    "subkey",
+    "subkeys",
     "subuid",
     "subuids",
     "sysctls",
