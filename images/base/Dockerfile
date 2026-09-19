@@ -2,12 +2,18 @@
 # run inside.
 #
 # It carries only what is common to all of them: git, the handful of tools
-# asdf's own plugins need, asdf itself, and a rootless container runtime for
-# the repositories whose tooling starts containers of its own. Everything a
-# repository actually pins (github-cli, pre-commit, nodejs and whatever it
-# adds later) is installed from that repository's own .tool-versions in a
-# layer on top of this one, so this image never has to know which
-# repositories exist or what they pin.
+# every repository's hooks reach for, the apt signing keys this organization
+# trusts, and a rootless container runtime for the repositories whose tooling
+# starts containers of its own. Everything a repository actually needs
+# (github-cli, pre-commit, nodejs and whatever it adds later) is installed
+# with apt in a layer on top of this one, so this image never has to know
+# which repositories exist or what they install.
+#
+# There is no version manager here. Tools come from signed package
+# repositories, so what installs them is apt, and what vouches for them is a
+# repository signature rather than a plugin's shell script. See
+# docs/TOOL_SOURCES.md for where each tool comes from and what its
+# provenance actually is.
 #
 # Ubuntu rather than debian:13-slim: measured 2026-09-14, ubuntu:24.04 is
 # 80.7 MB and debian:13-slim is 81.1 MB, so the "slim" distinction costs
@@ -26,23 +32,27 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Why each of these, since an unexplained package list grows forever:
 #
-#   ca-certificates  every download below and every plugin's own downloads
-#   curl             how asdf plugins fetch their releases
-#   git              the point of the image, and how asdf installs plugins
-#   gnupg            asdf-nodejs verifies release signatures with it
+#   ca-certificates  apt fetches every source below over https
+#   curl             used by this organization's scripts and hooks
+#   git              the point of the image
+#   gnupg            verifies and dearmors the apt signing keys further down
 #   jq               used by this organization's scripts and hooks
 #   make             most of these repositories drive their tasks with it
 #   openssh-client   git over ssh, and rsync-crypt's own test suite
 #   procps           ps, which pre-commit and several scripts shell out to
 #   python3          pre-commit runs on it
-#   tar unzip xz-utils   the archive formats asdf plugins ship in
+#
+# tar, unzip and xz-utils used to be here for the archive formats asdf
+# plugins shipped in. Nothing unpacks a release archive any more, so they
+# are gone; tar is an Essential package and stays present regardless.
 #
 # And the pieces that let a repository's own tooling start containers from
 # inside this one: pre-commit hooks such as hadolint-docker and
-# actionlint-docker, and a compose stack. They do nothing unless the
-# development container is started with the opt in flags docs/IMAGES.md
-# describes; without them, nesting fails and SELinux keeps confining the
-# container.
+# actionlint-docker, a compose stack, and the tflint image
+# pre-commit-checklists runs its terraform checklist through. They do
+# nothing unless the development container is started with the opt in flags
+# docs/IMAGES.md describes; without them, nesting fails and SELinux keeps
+# confining the container.
 #
 #   podman           the nested runtime, rootless like the host's
 #   podman-docker    a `docker` command that runs podman, because pre-commit's
@@ -83,10 +93,7 @@ RUN apt-get update \
     podman-docker \
     procps \
     python3 \
-    tar \
     uidmap \
-    unzip \
-    xz-utils \
   && rm -rf /var/lib/apt/lists/*
 
 # Ubuntu ships newuidmap and newgidmap setuid root, and inside a rootless
@@ -99,33 +106,50 @@ RUN chmod 0755 /usr/bin/newuidmap /usr/bin/newgidmap \
   && setcap cap_setuid=ep /usr/bin/newuidmap \
   && setcap cap_setgid=ep /usr/bin/newgidmap
 
-# asdf has been a single Go binary since 0.16, so it installs by download
-# rather than by cloning a shell repository the way older documentation
-# describes.
+# The apt signing keys this organization trusts, and nothing else about
+# those repositories.
 #
-# ASDF_SHA256 is not a value Renovate can derive, so a version bump has to
-# carry a new one. Recompute it with:
+# The keys are vendored under keyrings/ rather than downloaded here, so a
+# key changing is a diff somebody reviews in a pull request instead of
+# whatever the vendor served on the day of the build. Each one is checked
+# against the fingerprint below before it is dearmored, which is what makes
+# a tampered vendored file fail the build rather than ship.
 #
-#   curl -fsSL https://github.com/asdf-vm/asdf/releases/download/v<version>/asdf-v<version>-linux-amd64.tar.gz \
-#     | sha256sum
+# Installing a key grants nothing on its own: apt reads a keyring only when
+# a sources.list entry names it with signed-by=. So this image trusts these
+# three repositories in the sense that it has reviewed their keys, and pulls
+# from none of them. A repository that wants github-cli, nodejs or terraform
+# adds its own one line sources.list.d entry pointing at the keyring it
+# needs, the same way nesting is opt in per repository rather than a default
+# of the image. docs/TOOL_SOURCES.md has the exact lines.
 #
-# The archive is verified before anything out of it is executed.
-# renovate: datasource=github-releases depName=asdf-vm/asdf
-ARG ASDF_VERSION=0.20.0
-ARG ASDF_SHA256=9c25e1af7cc4c9d59ff3736eba14fd000480c32929258f80d8c5a8b290ebee14
-# The checksum is written to a file and checked from it rather than piped
-# into sha256sum. A pipe would need `SHELL ["/bin/bash", "-o", "pipefail",
-# "-c"]` to avoid masking a failure on its left-hand side, and Podman's
-# default OCI image format ignores SHELL entirely (it warns and carries on),
-# so the guard would hold under Docker and quietly not under Podman, which
-# is the runtime this organization actually builds with.
-RUN curl -fsSL -o /tmp/asdf.tar.gz \
-    "https://github.com/asdf-vm/asdf/releases/download/v${ASDF_VERSION}/asdf-v${ASDF_VERSION}-linux-amd64.tar.gz" \
-  && printf '%s  %s\n' "${ASDF_SHA256}" /tmp/asdf.tar.gz > /tmp/asdf.sha256 \
-  && sha256sum --check --strict /tmp/asdf.sha256 \
-  && tar -xzf /tmp/asdf.tar.gz -C /usr/local/bin asdf \
-  && rm /tmp/asdf.tar.gz /tmp/asdf.sha256 \
-  && asdf version
+# The fingerprint check is the last command in each pipeline rather than
+# something guarded by pipefail: Podman's default OCI image format ignores
+# SHELL entirely (it warns and carries on), so a pipefail guard would hold
+# under Docker and quietly not under the runtime this organization actually
+# builds with. That is what DL4006 asks for below, and why it is ignored:
+# the grep is the last command in its pipeline, so its exit status is the
+# pipeline's, and a fingerprint that does not match fails the build with or
+# without pipefail. Verified by swapping a vendored key for a freshly
+# generated one and watching the build stop.
+COPY keyrings/ /tmp/keyrings/
+# hadolint ignore=DL4006
+RUN set -eu; \
+  install -d -m 0755 /usr/share/keyrings; \
+  for entry in \
+      "github-cli:2C6106201985B60E6C7AC87323F3D4EA75716059" \
+      "nodesource:6F71F525282841EEDAF851B42F59B5F99B1BE0B4" \
+      "hashicorp:D55C0D1AC78A8D8126CB631CFC9CA96ACA026560"; do \
+    name="${entry%%:*}"; \
+    want="${entry#*:}"; \
+    gpg --show-keys --with-colons "/tmp/keyrings/${name}.asc" \
+      | awk -F: '/^fpr:/ { print $10 }' \
+      | grep -qx "${want}"; \
+    gpg --dearmor < "/tmp/keyrings/${name}.asc" \
+      > "/usr/share/keyrings/${name}.gpg"; \
+    chmod 0644 "/usr/share/keyrings/${name}.gpg"; \
+  done; \
+  rm -rf /tmp/keyrings
 
 # Ubuntu's own image already ships an account at uid 1000, named 'ubuntu',
 # so creating one there fails. Renaming it keeps uid and gid 1000, which is
@@ -176,18 +200,14 @@ USER 1000:1000
 # project.
 WORKDIR /workspace
 
-# asdf resolves tools through its shims directory, which has to be on PATH
-# before anything a repository pins can be found. The sbin directories are
-# listed too: an image built FROM this one runs its own RUN steps with this
-# PATH, and without them tools such as setcap and usermod are not found by
-# name there.
+# The sbin directories are listed explicitly: an image built FROM this one
+# runs its own RUN steps with this PATH, and without them tools such as
+# setcap and usermod are not found by name there.
 ENV HOME=/home/dev \
-    ASDF_DATA_DIR=/home/dev/.asdf \
-    PATH=/home/dev/.asdf/shims:/home/dev/.asdf/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-RUN mkdir -p "${ASDF_DATA_DIR}"
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
-      org.opencontainers.image.description="Base development image for the ivan-pinatti-labs repositories: git, asdf, the tools its plugins need, and rootless Podman for nested containers." \
+      org.opencontainers.image.description="Base development image for the ivan-pinatti-labs repositories: git, the common command line tools, this organization's trusted apt signing keys, and rootless Podman for nested containers." \
       org.opencontainers.image.licenses="Apache-2.0"
 
 CMD ["/bin/bash"]

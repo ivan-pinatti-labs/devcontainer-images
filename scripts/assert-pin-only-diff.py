@@ -33,11 +33,24 @@ from a backdoored one. Renovate's minimumReleaseAge window in
 .github/renovate.json5 is the actual defence against that; see
 docs/MERGE_PIPELINE.md.
 
-This repository has no Makefile, no Dockerfile, and no .env.example, unlike
-docker-torrent-box-with-vpn and rsync-crypt, so it also has no
-ALPINE_VERSION-shaped annotated pin and no custom regex manager to anchor
-one against. ALLOWED_PATHS below is three surfaces, not rsync-crypt's four,
-and normalize() carries no .env.example branch at all.
+This repository has no Makefile and no .env.example, unlike
+docker-torrent-box-with-vpn and rsync-crypt, so normalize() carries no
+.env.example branch at all. It does have a Dockerfile, `images/base/Dockerfile`,
+which is the whole point of the repository, and Renovate's dockerfile manager
+moves the tag and digest on its FROM line.
+
+That surface was missing here until 2026-09-19, and the omission was not
+cosmetic: renovate.json5 marks the base image digest bump `automerge: true`,
+calling it "the one base image update that should merge on its own", while
+this script refused it as "not a dependency pin file" every time. The update
+that was meant to merge unattended could never pass its own required check.
+The weekly rebuild that exists to pick up upstream security fixes was
+therefore stalled behind a person on every single run.
+
+`.tool-versions` used to be a fourth surface here. asdf was removed from this
+repository on 2026-09-19 (see docs/TOOL_SOURCES.md), the file is gone, and
+tools now come from signed apt repositories whose versions this repository
+does not pin at all, so there is nothing left for a bot to bump there.
 """
 
 import hashlib
@@ -54,20 +67,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # The pin surfaces a dependency bot actually touches in this repository.
 # Dependabot manages `.github/workflows/` (Action SHAs) and
 # `.pre-commit-config.yaml` (the pre-commit-checklists `rev:` pin), see
-# .github/dependabot.yml. Renovate manages `.tool-versions` (the asdf
-# manager: pre-commit, github-cli), see .github/renovate.json5. Neither bot
-# touches anything else in this repository: there is no requirements.txt, no
-# Makefile, and no .env.example for either to have opinions about.
+# .github/dependabot.yml. Renovate manages the same two plus the base image
+# tag and digest on `images/base/Dockerfile`'s FROM line, see
+# .github/renovate.json5. Neither bot touches anything else in this
+# repository: there is no requirements.txt, no Makefile, and no .env.example
+# for either to have opinions about.
 ALLOWED_PATHS = (
-    ".tool-versions",
     ".pre-commit-config.yaml",
     ".github/workflows/",
+    "images/base/Dockerfile",
 )
 
 # A released version, always starting with a digit (an optional single
-# leading `v` aside): `2.2.2`, `v2.2.2`, `4.6.2`. Anchors both `rev:` in
-# `.pre-commit-config.yaml` and every value in `.tool-versions`, and is
-# deliberately narrower than "any tag-shaped token": a floating ref like
+# leading `v` aside): `2.2.2`, `v2.2.2`, `4.6.2`. Anchors `rev:` in
+# `.pre-commit-config.yaml`, and is deliberately narrower than "any tag-shaped token": a floating ref like
 # `main` or `latest` is made entirely of characters this would otherwise
 # accept, and normalizing it the same as a real release would let a
 # compromised bot trade an immutable pin for something that can move under
@@ -75,26 +88,34 @@ ALLOWED_PATHS = (
 # catch it.
 RELEASE = r"v?[0-9][0-9A-Za-z.+_-]*"
 
-# `.tool-versions` writes `<tool> <version>`, one per line, with nothing to
-# anchor on but the space. That cannot go in the prefix set below, because a
-# lookbehind of variable width is not allowed and "the word after a space"
-# would match most of a workflow file. It is matched whole-line instead, and
-# only for that file, which is why normalize() takes the path. The value
-# after the space has to be a real release, not merely non-blank:
-# `pre-commit main` would otherwise normalize identically to
-# `pre-commit 4.5.1`.
-TOOL_VERSION_LINE = re.compile(
-    r"^(?P<prefix>[A-Za-z0-9_.-]+[ \t]+)" + RELEASE + r"[ \t]*$"
+# A container image pinned by tag and digest, in the two shapes this
+# organization writes: `FROM <image>:<tag>@sha256:<64 hex>` here, and
+# `ARG BASE_IMAGE=<image>:<tag>@sha256:<64 hex>` in the repositories that
+# build on top of the base image. Both are covered so that the six copies of
+# this script across the organization can stay identical.
+#
+# The image name is captured into the prefix and put back untouched, so
+# `ubuntu` becoming `evil/ubuntu` has no counterpart on the other side and
+# the diff is refused. Only the tag and the digest normalize away.
+#
+# The digest must be a full 64 character sha256, for the same reason an
+# action pin must be a full commit SHA rather than a tag: that is the shape
+# that cannot move under the pin after the diff is merged. A FROM line
+# carrying a tag and no digest does not match this pattern at all, so
+# dropping the digest reads as a structural change and is refused.
+DOCKER_IMAGE_PIN = re.compile(
+    r"(?P<prefix>^(?:FROM[ \t]+(?:--platform=\S+[ \t]+)?"
+    r"|ARG[ \t]+[A-Za-z0-9_]*BASE_IMAGE=)"
+    r"[A-Za-z0-9._/-]+:)"
+    r"[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}[ \t]*$"
 )
 
-# A pre-commit hook `rev:`. The prefix is captured and put back, so that a
-# pin changing shape rather than value still reads as a difference.
-#
-# GitHub Actions pins are handled separately below rather than through this
-# same released-version grammar: this repository pins every action to a
-# full commit SHA rather than a tag (see any `uses:` line in
-# .github/workflows/), so the immutable shape to require there is a SHA,
-# not a release number.
+
+def _normalize_image_pin(match: re.Match[str]) -> str:
+    """Keep the registry and image name, normalize the tag and digest away."""
+    return f"{match.group('prefix')}<version>"
+
+
 REV_PIN = re.compile(r"(?P<prefix>\brev:[ \t]+)" + RELEASE)
 
 # A GitHub Actions pin, always a full 40 character commit SHA in this
@@ -485,8 +506,8 @@ def _whole_file_block_scalars(
 
 def normalize(line: str, path: str = "", in_block_scalar: bool = False) -> str:
     """Reduce a line to everything about it that a version bump may not change."""
-    if path.endswith(".tool-versions"):
-        return TOOL_VERSION_LINE.sub(r"\g<prefix><version>", line)
+    if path.endswith("Dockerfile"):
+        return DOCKER_IMAGE_PIN.sub(_normalize_image_pin, line)
     if in_block_scalar:
         return line
     line = ACTION_SHA.sub(_normalize_action_pin, line)

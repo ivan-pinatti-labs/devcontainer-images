@@ -2,10 +2,15 @@
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
 
   // Renovate is this template's active dependency bot: it covers every pin
-  // surface this repository has, not just the asdf tool versions pinned in
-  // .tool-versions (pre-commit, github-cli) it originally shipped scoped to,
-  // but also the pre-commit-checklists rev: pin in .pre-commit-config.yaml
-  // and every commit-SHA action pin under .github/workflows/. Dependabot's
+  // surface this repository has. That is the pre-commit-checklists rev: pin
+  // in .pre-commit-config.yaml, every commit-SHA action pin under
+  // .github/workflows/, and the base image tag and digest on
+  // images/base/Dockerfile's FROM line. It used to also cover asdf tool
+  // versions in .tool-versions; asdf was removed from this organization on
+  // 2026-09-19 and that file no longer exists, so the asdf manager is gone
+  // with it. Tools now come from signed apt repositories and are
+  // deliberately not version pinned at all; docs/TOOL_SOURCES.md says why,
+  // and the weekly rebuild is what keeps them current. Dependabot's
   // own config for those same two ecosystems (dependabot.yml) is still
   // present, deliberately, but disabled (open-pull-requests-limit: 0 on
   // both its blocks): this repository is a GitHub template, so a project
@@ -28,12 +33,14 @@
   // it entirely to fall back to config:recommended's own defaults, once it
   // has something else for Renovate to watch; see README.md's "Using this
   // template" step 5.
-  // customManagers:dockerfileVersions is what reads the `# renovate:`
-  // annotation above ARG ASDF_VERSION in images/base/Dockerfile. Neither the
-  // dockerfile manager (which only sees FROM lines) nor asdf extracts an
-  // annotated ARG, so without this preset that pin would sit unwatched while
-  // the config looked like it covered the file.
-  extends: ["config:recommended", "customManagers:dockerfileVersions"],
+  // customManagers:dockerfileVersions used to be listed here, to read the
+  // `# renovate:` annotation above ARG ASDF_VERSION in
+  // images/base/Dockerfile. That ARG is gone along with asdf, and no
+  // annotated version ARG replaced it: the apt packages installed on top of
+  // this image are not version pinned, so there is nothing for an annotation
+  // to anchor. The dockerfile manager alone now covers the file, since the
+  // FROM line is all that is left to watch.
+  extends: ["config:recommended"],
 
   // Kept on despite the standing, never-resolving tracking issue it opens.
   // Without it, "Renovate found nothing to update" and "Renovate silently
@@ -73,29 +80,20 @@
   // person rather than merging on the strength of a default nobody chose.
   automerge: false,
 
-  // The four pin surfaces this repository actually has. asdf covers
-  // .tool-versions; github-actions covers every uses: SHA pin under
-  // .github/workflows/; pre-commit covers .pre-commit-config.yaml's rev:;
-  // dockerfile covers the base image tag and digest in images/base/Dockerfile.
-  // github-actions, pre-commit and docker are also configured, disabled, in
-  // dependabot.yml; see the file header above. Dropping either manager
-  // from this list is the other half of switching that ecosystem back to
-  // Dependabot, alongside raising its open-pull-requests-limit there.
+  // The three pin surfaces this repository actually has. github-actions
+  // covers every uses: SHA pin under .github/workflows/; pre-commit covers
+  // .pre-commit-config.yaml's rev:; dockerfile covers the base image tag and
+  // digest on images/base/Dockerfile's FROM line. All three are also
+  // configured, disabled, in dependabot.yml; see the file header above.
+  // Dropping a manager from this list is the other half of switching that
+  // ecosystem back to Dependabot, alongside raising its
+  // open-pull-requests-limit there.
   //
   // The dockerfile manager updates the tag and the digest of the FROM line
-  // together. It cannot touch ASDF_SHA256, which is a checksum rather than a
-  // version, so an asdf bump is a pull request a person finishes by hand;
-  // docs/IMAGES.md says how.
-  // custom.regex is listed because enabledManagers is an explicit allow list:
-  // the preset in extends above defines a custom manager, and a manager this
-  // list does not name stays off however it was defined.
-  enabledManagers: [
-    "asdf",
-    "github-actions",
-    "pre-commit",
-    "dockerfile",
-    "custom.regex",
-  ],
+  // together, which is the only pin left in that file. The apt packages a
+  // repository installs on top of this image carry no version pin for
+  // Renovate to move.
+  enabledManagers: ["github-actions", "pre-commit", "dockerfile"],
 
   // Renovate's pre-commit manager ships disabled by its own default even
   // when named in enabledManagers above (confirmed with
@@ -119,8 +117,7 @@
   // Seven days, the same as the sibling repositories, because the reasoning
   // is about how long a compromised release typically takes to be spotted
   // and pulled, not about this repository's (much smaller) dependency
-  // surface. Two asdf tool pins carry no materially different risk profile
-  // that would justify a shorter wait.
+  // surface.
   minimumReleaseAge: "7 days",
 
   // Hold the pull request until the window is satisfied rather than opening
@@ -152,23 +149,15 @@
     // pin position, checked line by line, before the label alone can do
     // anything; see docs/MERGE_PIPELINE.md.
     //
-    // patch and minor only, across every enabled manager: an asdf tool, a
-    // pinned action, or a pre-commit hook rev could each in principle offer
-    // a major, which is exactly the case that needs a person to check
-    // nothing else in this repository's tooling assumes the old major's
-    // behavior.
+    // patch and minor only, across every enabled manager: a pinned action
+    // or a pre-commit hook rev could each in principle offer a major, which
+    // is exactly the case that needs a person to check nothing else in this
+    // repository's tooling assumes the old major's behavior.
     {
       matchUpdateTypes: ["patch", "minor"],
       automerge: true,
       addLabels: ["automerge"],
     },
-    {
-      matchManagers: ["asdf"],
-      groupName: "asdf tool versions",
-      groupSlug: "asdf-tools",
-      labels: ["dependencies", "tooling"],
-    },
-
     // One grouped pull request per ecosystem, the same shape Dependabot's
     // own (disabled) groups in dependabot.yml produce, each with a
     // matching label added on top of the plain "dependencies" label above.
@@ -214,24 +203,6 @@
       matchUpdateTypes: ["digest"],
       automerge: true,
       addLabels: ["automerge"],
-    },
-
-    // ASDF_VERSION and ASDF_SHA256 in images/base/Dockerfile are two halves
-    // of one pin, and Renovate can only move the first: a checksum is not a
-    // version, and no datasource publishes it as one. So a bump arrives
-    // deliberately incomplete, the build fails on the mismatch (which is the
-    // verification working, not a flake), and a person finishes it. Never
-    // automerged for that reason, and the note says so in the pull request
-    // itself rather than only here.
-    {
-      matchManagers: ["custom.regex"],
-      matchDepNames: ["asdf-vm/asdf"],
-      automerge: false,
-      labels: ["dependencies", "tooling"],
-      prBodyNotes: [
-        "`ASDF_SHA256` in `images/base/Dockerfile` is **not** updated by this pull request, because Renovate cannot compute an archive checksum. Recompute it and push the new value before merging, or the build fails on the mismatch:",
-        "```shell\ncurl -fsSL https://github.com/asdf-vm/asdf/releases/download/v<version>/asdf-v<version>-linux-amd64.tar.gz | sha256sum\n```",
-      ],
     },
 
     // The github-actions manager extracts more than uses: pins by default:
