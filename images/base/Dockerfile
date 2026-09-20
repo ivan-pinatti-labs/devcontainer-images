@@ -3,9 +3,10 @@
 #
 # It carries only what is common to all of them: git, the handful of tools
 # every repository's hooks reach for, the apt signing keys this organization
-# trusts, and a rootless container runtime for the repositories whose tooling
-# starts containers of its own. Everything a repository actually needs
-# (github-cli, pre-commit, nodejs and whatever it adds later) is installed
+# trusts, the two coding agent command line tools every repository is worked
+# on with, and a rootless container runtime for the repositories whose
+# tooling starts containers of its own. Everything else a repository needs
+# (github-cli, pre-commit, terraform and whatever it adds later) is installed
 # with apt in a layer on top of this one, so this image never has to know
 # which repositories exist or what they install.
 #
@@ -41,6 +42,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   openssh-client   git over ssh, and rsync-crypt's own test suite
 #   procps           ps, which pre-commit and several scripts shell out to
 #   python3          pre-commit runs on it
+#   nodejs           the runtime both coding agent CLIs below are written for
 #
 # tar, unzip and xz-utils used to be here for the archive formats asdf
 # plugins shipped in. Nothing unpacks a release archive any more, so they
@@ -174,6 +176,68 @@ RUN set -eu; \
   done; \
   rm -rf /tmp/keyrings
 
+# The one third party repository this image enables for itself, because it
+# installs from it: NodeSource, for the Node.js the two coding agent CLIs
+# below run on. Ubuntu's own nodejs is a major version behind what they
+# expect.
+#
+# The other two keyrings stay inert here. A repository that wants github-cli
+# or terraform adds its own source entry; see docs/TOOL_SOURCES.md.
+# hadolint ignore=DL3008
+RUN printf '%s\n' \
+      'deb [arch=amd64 signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main' \
+      > /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends nodejs \
+  && rm -rf /var/lib/apt/lists/*
+
+# The coding agent command line tools, and the reason this image carries
+# Node.js at all. Both are worked with in every repository in this
+# organization, so they belong here rather than in each one's own layer.
+#
+# Neither publishes an apt repository, from its vendor or any distribution,
+# so this is the tflint situation again with a different answer: npm is the
+# vendors' own distribution channel for both, and npm can actually be
+# verified. `npm audit signatures` checks two separate things and this build
+# fails closed on either.
+#
+#   registry signature   npm signs every tarball it serves with its own key,
+#                        so the bytes installed are the bytes the publisher
+#                        uploaded. Both packages have one.
+#   build provenance     a SLSA attestation tying the tarball to the source
+#                        commit and the workflow that built it. @openai/codex
+#                        publishes one. @anthropic-ai/claude-code does not,
+#                        measured 2026-09-19, so it carries the weaker of the
+#                        two guarantees and docs/TOOL_SOURCES.md says so
+#                        rather than letting "installed from npm" imply more
+#                        than it is.
+#
+# Pinned, unlike the apt packages, and that difference is deliberate. An apt
+# package is unpinned here because Ubuntu and these vendors ship security
+# fixes by moving a version inside a release, with a distribution maintainer
+# between upstream and this image. npm has no such gatekeeper: whatever the
+# publisher pushed is what `npm install` resolves, seconds after they push
+# it. A pin is what lets Renovate's seven day minimumReleaseAge and `Pin
+# Only` stand between a fresh npm release and this image, which is the only
+# defence that exists against a well formed malicious publish.
+#
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
+ARG CLAUDE_CODE_VERSION=2.1.278
+# renovate: datasource=npm depName=@openai/codex
+ARG CODEX_VERSION=0.155.1
+WORKDIR /opt/agent-clis
+RUN set -eu; \
+  npm init --yes >/dev/null; \
+  npm install --no-audit --no-fund --save-exact \
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    "@openai/codex@${CODEX_VERSION}"; \
+  npm audit signatures; \
+  ln -s /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude; \
+  ln -s /opt/agent-clis/node_modules/.bin/codex /usr/local/bin/codex; \
+  npm cache clean --force >/dev/null 2>&1 || true; \
+  claude --version; \
+  codex --version
+
 # Ubuntu's own image already ships an account at uid 1000, named 'ubuntu',
 # so creating one there fails. Renaming it keeps uid and gid 1000, which is
 # what makes a bind mounted working tree readable and writable under
@@ -230,7 +294,7 @@ ENV HOME=/home/dev \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
-      org.opencontainers.image.description="Base development image for the ivan-pinatti-labs repositories: git, the common command line tools, this organization's trusted apt signing keys, and rootless Podman for nested containers." \
+      org.opencontainers.image.description="Base development image for the ivan-pinatti-labs repositories: git, the common command line tools, the Claude Code and Codex CLIs, this organization's trusted apt signing keys, and rootless Podman for nested containers." \
       org.opencontainers.image.licenses="Apache-2.0"
 
 CMD ["/bin/bash"]

@@ -1,7 +1,7 @@
 # Where the tools come from
 
 <!-- cspell:words nodesource keyrings dearmor dearmored enarmor gpgv -->
-<!-- cspell:words dpkg nodistro pkgs pipx subkey subkeys -->
+<!-- cspell:words dpkg nodistro pkgs pipx subkey subkeys userns SLSA -->
 
 Every command line tool these repositories develop against, where it is
 installed from, and what actually vouches for it.
@@ -129,6 +129,9 @@ side of the diff and the pull request waits for a person.
 | nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | 24.21.0, the same version the retired pin named |
 | terraform | `apt.releases.hashicorp.com resolute main` | repository signature | 1.16.3, ahead of the retired pin |
 | tflint | `ghcr.io/terraform-linters/tflint`, pinned by digest | container image published by the project | see below |
+| nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | in the base image, the runtime both agent CLIs need |
+| claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | in the base image, see below |
+| codex (Codex CLI) | npm `@openai/codex`, version pinned | npm registry signature **and** SLSA build provenance | in the base image, see below |
 
 ### tflint is the exception
 
@@ -146,6 +149,78 @@ in this organization's images, so it does not appear in their SBOMs and is
 not covered by their vulnerability scans. It is scanned by whoever publishes
 it, not here. That is a real reduction in visibility, accepted because the
 alternative kept an unsigned release download in the build.
+
+### The two coding agent CLIs
+
+Neither Claude Code nor Codex publishes an apt repository, from its vendor or
+from any distribution, so neither can follow the rule the rest of this
+document sets out. npm is the vendors' own distribution channel for both, and
+unlike a bare download it can actually be verified, so that is what the build
+does and what it checks.
+
+`npm audit signatures` runs as a build step and the build fails closed on it.
+It checks two different things, and the two packages do not both get both:
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| npm registry signature | yes | yes |
+| SLSA build provenance attestation | **no** | yes |
+
+The registry signature means the bytes installed are the bytes the publisher
+uploaded, verifiable against npm's own public key. The SLSA attestation goes
+further and ties the tarball to the source commit and the workflow that built
+it. Measured 2026-09-19 against the registry: `@openai/codex` publishes one
+and `@anthropic-ai/claude-code` does not. "Installed from npm" is therefore a
+weaker statement for Claude Code than for Codex, and this table exists so
+that difference is visible rather than implied.
+
+These two are **version pinned**, which nothing installed with apt is. The
+difference is deliberate. An apt package is unpinned because Ubuntu and these
+vendors ship security fixes by moving a version inside a release, with a
+distribution maintainer sitting between upstream and this image. npm has no
+such gatekeeper: whatever a publisher pushes is what `npm install` resolves
+seconds later. The pin is what lets Renovate's seven day `minimumReleaseAge`
+and `Pin Only` stand between a fresh npm release and this image, and it is
+the only defence that works against a release that is well formed and
+malicious.
+
+## Getting a shell without an IDE
+
+Every repository with a development container carries a `make shell` target,
+so the container is usable from an ordinary terminal and nothing here
+requires an editor. The target builds the container and runs it with the
+repository mounted at `/workspace`, plus the two agent configuration
+directories bind mounted from the host:
+
+The target builds the container, then runs it roughly like this:
+
+```shell
+podman run --rm -it --userns=keep-id \
+  -v "${PWD}:/workspace:rw,Z" \
+  -v "${HOME}/.claude:/home/dev/.claude:rw,z" \
+  -v "${HOME}/.codex:/home/dev/.codex:rw,z" \
+  -w /workspace "${DEV_IMAGE}" bash
+```
+
+The authoritative version is the `shell` target in each repository's own
+`Makefile`, not this sketch.
+
+Sessions, transcripts and credentials therefore live on the host and survive
+the container, and the same history is visible whether an agent is run from
+this shell or from the host.
+
+Two things about those two mounts specifically:
+
+- **Lowercase `z`, not uppercase `Z`.** `Z` labels a mount private to one
+  container, and applying it to a directory the host's own agents also use
+  would take that directory away from them and from every other repository's
+  container. `z` is the shared label, which is what a directory used by more
+  than one consumer needs.
+- **`SHELL_EXTRA_MOUNTS` exists for symlinks that leave the tree.** A bind
+  mount carries a symlink as a symlink, so if anything under `~/.claude`
+  points outside `~/.claude`, it dangles inside the container until its
+  target is mounted too. That is a per machine detail, so it is a variable
+  rather than a hard coded path.
 
 ## What the scanners see now
 

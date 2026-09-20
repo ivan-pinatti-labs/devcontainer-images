@@ -116,6 +116,41 @@ def _normalize_image_pin(match: re.Match[str]) -> str:
     return f"{match.group('prefix')}<version>"
 
 
+# The `# renovate:` annotated ARG lines in images/base/Dockerfile, which the
+# custom.regex manager moves: the two npm agent CLI versions today. Only a
+# version may change, and only on an ARG this file actually annotates.
+#
+# The eligible names are read from the base Dockerfile on main rather than
+# hard coded, so adding an annotated ARG does not also mean remembering to
+# edit this script, and so an ARG that carries no annotation (and that
+# therefore no bot manages) is graded as an ordinary line instead of being
+# handed a version shaped exemption it never earned.
+ANNOTATED_ARG = re.compile(
+    r"^#[ \t]*renovate:.*\n^ARG[ \t]+(?P<name>[A-Z][A-Z0-9_]*)=", re.MULTILINE
+)
+
+
+def _annotated_arg_names() -> frozenset[str]:
+    dockerfile = REPO_ROOT / "images" / "base" / "Dockerfile"
+    try:
+        text = dockerfile.read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    return frozenset(m.group("name") for m in ANNOTATED_ARG.finditer(text))
+
+
+ARG_PIN = re.compile(
+    r"^(?P<prefix>ARG[ \t]+(?P<name>[A-Z][A-Z0-9_]*)=)" + RELEASE + r"[ \t]*$"
+)
+
+
+def _normalize_arg_pin(match: re.Match[str]) -> str:
+    """Normalize the value of an annotated ARG, and nothing else."""
+    if match.group("name") not in _annotated_arg_names():
+        return match.group(0)
+    return f"{match.group('prefix')}<version>"
+
+
 REV_PIN = re.compile(r"(?P<prefix>\brev:[ \t]+)" + RELEASE)
 
 # A GitHub Actions pin, always a full 40 character commit SHA in this
@@ -507,7 +542,8 @@ def _whole_file_block_scalars(
 def normalize(line: str, path: str = "", in_block_scalar: bool = False) -> str:
     """Reduce a line to everything about it that a version bump may not change."""
     if path.endswith("Dockerfile"):
-        return DOCKER_IMAGE_PIN.sub(_normalize_image_pin, line)
+        line = DOCKER_IMAGE_PIN.sub(_normalize_image_pin, line)
+        return ARG_PIN.sub(_normalize_arg_pin, line)
     if in_block_scalar:
         return line
     line = ACTION_SHA.sub(_normalize_action_pin, line)

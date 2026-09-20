@@ -18,29 +18,31 @@
   // dependabot.yml stays fully configured so that is a one-line change
   // there rather than reconstructing config from scratch. See README.md's
   // "What you get" and "Using this template" step 5. There is no
-  // .env.example or annotated version string here for a custom regex
-  // manager to track, unlike ivan-pinatti-labs/rsync-crypt's copy of this
-  // file, so enabledManagers below has no regex manager the way that repo's
-  // does.
+  // .env.example here, unlike ivan-pinatti-labs/rsync-crypt's copy of this
+  // file, but there are two annotated version strings (the coding agent CLI
+  // pins in images/base/Dockerfile), so enabledManagers below does name a
+  // regex manager, as that repo's does.
   //
-  // enabledManagers below is an explicit list of exactly those three
+  // enabledManagers below is an explicit list of exactly those four
   // managers, not left as a generic catch-all the way this template's
   // config was before this file was first aligned with the org's merge
   // pipeline (docs/MERGE_PIPELINE.md): this repo has nothing else for
   // Renovate to manage yet. A repo created from this template that grows
-  // real dependencies beyond these three surfaces (npm, pip, a Dockerfile, a
-  // Terraform module registry, ...) needs to widen enabledManagers, or drop
+  // real dependencies beyond these four surfaces (pip, a Terraform module
+  // registry, ...) needs to widen enabledManagers, or drop
   // it entirely to fall back to config:recommended's own defaults, once it
   // has something else for Renovate to watch; see README.md's "Using this
   // template" step 5.
-  // customManagers:dockerfileVersions used to be listed here, to read the
-  // `# renovate:` annotation above ARG ASDF_VERSION in
-  // images/base/Dockerfile. That ARG is gone along with asdf, and no
-  // annotated version ARG replaced it: the apt packages installed on top of
-  // this image are not version pinned, so there is nothing for an annotation
-  // to anchor. The dockerfile manager alone now covers the file, since the
-  // FROM line is all that is left to watch.
-  extends: ["config:recommended"],
+  // customManagers:dockerfileVersions reads the `# renovate:` annotations
+  // above the two ARG lines in images/base/Dockerfile that pin the coding
+  // agent CLI versions. Neither the dockerfile manager (which only sees FROM
+  // lines) nor any npm manager (there is no package.json here; the install
+  // happens inside a RUN) extracts an annotated ARG, so without this preset
+  // those two pins would sit unwatched while the config looked like it
+  // covered the file. It was briefly removed alongside asdf, whose
+  // ASDF_VERSION was its previous reason to exist, and came back with these
+  // two.
+  extends: ["config:recommended", "customManagers:dockerfileVersions"],
 
   // Kept on despite the standing, never-resolving tracking issue it opens.
   // Without it, "Renovate found nothing to update" and "Renovate silently
@@ -80,20 +82,27 @@
   // person rather than merging on the strength of a default nobody chose.
   automerge: false,
 
-  // The three pin surfaces this repository actually has. github-actions
+  // The four pin surfaces this repository actually has. github-actions
   // covers every uses: SHA pin under .github/workflows/; pre-commit covers
   // .pre-commit-config.yaml's rev:; dockerfile covers the base image tag and
-  // digest on images/base/Dockerfile's FROM line. All three are also
+  // digest on images/base/Dockerfile's FROM line; custom.regex covers the
+  // two annotated ARG lines pinning the coding agent CLI versions in that
+  // same file. The first three are also
   // configured, disabled, in dependabot.yml; see the file header above.
   // Dropping a manager from this list is the other half of switching that
   // ecosystem back to Dependabot, alongside raising its
   // open-pull-requests-limit there.
   //
   // The dockerfile manager updates the tag and the digest of the FROM line
-  // together, which is the only pin left in that file. The apt packages a
-  // repository installs on top of this image carry no version pin for
-  // Renovate to move.
-  enabledManagers: ["github-actions", "pre-commit", "dockerfile"],
+  // together. The apt packages a repository installs on top of this image
+  // carry no version pin for Renovate to move; the two npm agent CLIs do,
+  // and custom.regex is what moves them.
+  enabledManagers: [
+    "github-actions",
+    "pre-commit",
+    "dockerfile",
+    "custom.regex",
+  ],
 
   // Renovate's pre-commit manager ships disabled by its own default even
   // when named in enabledManagers above (confirmed with
@@ -203,6 +212,22 @@
       matchUpdateTypes: ["digest"],
       automerge: true,
       addLabels: ["automerge"],
+    },
+
+    // The two coding agent CLI versions, the only version pinned software in
+    // this image. Everything installed with apt is deliberately unpinned
+    // (docs/TOOL_SOURCES.md); these are pinned precisely so this cooldown and
+    // `Pin Only` apply to them, because npm has no distribution maintainer
+    // standing between a publisher and this build the way Ubuntu does. They
+    // take the ordinary patch and minor automerge from the first rule above,
+    // which the seven day window and the line by line pin check are what make
+    // safe.
+    {
+      matchManagers: ["custom.regex"],
+      matchDatasources: ["npm"],
+      groupName: "coding agent CLIs",
+      groupSlug: "agent-clis",
+      labels: ["dependencies", "tooling"],
     },
 
     // The github-actions manager extracts more than uses: pins by default:
