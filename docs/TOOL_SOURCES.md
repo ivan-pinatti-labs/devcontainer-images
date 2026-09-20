@@ -33,9 +33,14 @@ Nothing here pins a package version, deliberately.
 Ubuntu and the third party repositories below all ship security fixes by
 moving a package's version inside a release. Pinning would hold an image on
 the superseded build until somebody edited the pin by hand, which is the
-opposite of what the scheduled rebuild exists for. The base image digest is
-what makes a build reproducible; the apt upgrade on rebuild is what makes it
-current.
+opposite of what the scheduled rebuild exists for.
+
+The digest pins what an image builds *on*, not what apt resolves on top, so
+two builds of the same Dockerfile weeks apart can and should install
+different package builds. This layer is deliberately rolling, not
+reproducible, and the two should not be confused: reproducing an exact
+container means keeping the image, not re-running the build. Rebuilding is
+what makes it current, which is the property being chosen here.
 
 What that costs is the seven day cooling window Renovate applies elsewhere:
 there is no version for it to hold back. What replaces it is the
