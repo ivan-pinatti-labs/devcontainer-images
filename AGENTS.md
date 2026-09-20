@@ -24,10 +24,10 @@ are more specific, follow them.
 
 ### Run binaries in containers, not on the host
 
-A binary that did not come from the operating system's package manager or a
-version manager such as asdf (a release download, an installer script, a new
-version under evaluation, a scanner, a debugging tool) runs inside a rootless
-Podman container, never directly on the host. That holds when validating,
+A binary that did not come from the operating system's package manager (a
+release download, an installer script, a new version under evaluation, a
+scanner, a debugging tool) runs inside a rootless Podman container, never
+directly on the host. That holds when validating,
 testing, checking a new version and debugging.
 
 ```bash
@@ -91,11 +91,13 @@ what it carries, how a repository consumes it, and how the build works.
   layer blocks the publish. Vulnerabilities are reported rather than
   blocking, except a critical one with a fix available, which blocks.
 - The base image carries only what every repository needs. A tool one
-  repository pins belongs in that repository's `.tool-versions`, installed
-  in a layer on top, not here. Rootless Podman is in the base because nearly
-  every repository's hooks start containers, and it stays inert until a
-  repository opts in to nesting (docs/IMAGES.md, "Running containers inside
-  it").
+  repository needs is installed with apt in a layer on top, not here. This
+  image carries the apt signing keys for that, and enables none of those
+  repositories itself: see `docs/TOOL_SOURCES.md`. There is no version
+  manager in the image and no `.tool-versions` anywhere in the
+  organization. Rootless Podman is in the base because nearly every
+  repository's hooks start containers, and it stays inert until a repository
+  opts in to nesting (docs/IMAGES.md, "Running containers inside it").
 - Nesting is opt in per repository, never a default of the image: the
   `--security-opt label=type:container_engine_t --device /dev/fuse` flags go
   in that repository's own devcontainer.json, and its documentation says

@@ -7,25 +7,37 @@
   `ghcr.io/ivan-pinatti-labs/devcontainer-base`.
 
 The base image carries what every repository in the organization needs and
-nothing that only one of them needs: git, asdf, the tools asdf's plugins
-depend on to fetch and verify their releases, and rootless Podman for the
+nothing that only one of them needs: git, the common command line tools, the
+apt signing keys this organization trusts, and rootless Podman for the
 repositories whose tooling starts containers of its own (see "Running
 containers inside it" below).
 
-It deliberately does **not** carry github-cli, pre-commit or nodejs, even
-though nearly every repository pins those. They belong to a repository's own
-`.tool-versions`, and installing them here would mean two places to bump a
-version and a base image rebuild every time any repository moved a pin.
+There is **no version manager** in it. Tools come from signed package
+repositories, installed with apt; `TOOL_SOURCES.md` is the reference for
+where each one comes from and what vouches for it.
+
+It deliberately does **not** carry github-cli, pre-commit, nodejs or
+terraform, even though nearly every repository uses one of them. Installing
+them here would rebuild the base image every time any single repository
+changed what it needs. It carries their signing keys instead, which is the
+part that is genuinely common, and enables none of those repositories
+itself: a keyring does nothing until a `sources.list` entry names it.
 
 ## How a repository uses it
 
-Install that repository's pins on top of the base:
+Install what that repository needs on top of the base:
 
 ```dockerfile
 FROM ghcr.io/ivan-pinatti-labs/devcontainer-base@sha256:<digest>
 
-COPY .tool-versions .
-RUN asdf install
+USER 0:0
+RUN printf '%s\n' \
+      'deb [arch=amd64 signed-by=/usr/share/keyrings/github-cli.gpg] https://cli.github.com/packages stable main' \
+      > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends gh pre-commit \
+  && rm -rf /var/lib/apt/lists/*
+USER 1000:1000
 ```
 
 By digest, never by a floating tag. A tag would let a rebuild change the
@@ -33,11 +45,14 @@ toolchain under a checkout with no commit saying so, which is the failure the
 digest pin exists to prevent. Renovate can keep the digest current, and its
 pull request is then the record that the environment changed.
 
+Package versions are deliberately not pinned; `TOOL_SOURCES.md` says why.
+
 ## Running containers inside it
 
 Most of these repositories start containers from inside their development
-container: pre-commit's `hadolint-docker` and `actionlint-docker` hooks, and
-docker-torrent-box-with-vpn's whole stack. The image carries rootless Podman
+container: pre-commit's `hadolint-docker` and `actionlint-docker` hooks,
+pre-commit-checklists' tflint, and docker-torrent-box-with-vpn's whole
+stack. The image carries rootless Podman
 for that, plus a `docker` command that runs it, because pre-commit's
 `docker_image` hooks call `docker` by name.
 
@@ -177,19 +192,15 @@ The weekly rebuild exists because step 4's "a rebuild away" has to actually
 happen. It publishes a new digest and cuts no release, so nothing consumes it
 until a repository bumps its pin.
 
-## Bumping asdf
+## Changing a signing key
 
-`ASDF_VERSION` in the Dockerfile carries a matching `ASDF_SHA256`, which
-Renovate cannot compute: a checksum is not a version, and no datasource
-publishes it as one. Renovate still proposes the version bump, with a note in
-the pull request saying the checksum is missing, and that pull request is
-never automerged. Finish it by recomputing the checksum and pushing it:
+The three third party apt keys are vendored under `images/base/keyrings/`
+and checked against the fingerprints listed in `TOOL_SOURCES.md` before the
+build dearmors them. A key that does not match its fingerprint fails the
+build.
 
-```shell
-curl -fsSL https://github.com/asdf-vm/asdf/releases/download/v<version>/asdf-v<version>-linux-amd64.tar.gz \
-  | sha256sum
-```
-
-The build verifies the archive against that value before executing anything
-out of it, so a mismatched pair fails the build rather than shipping an
-unverified binary.
+Rotating one is a deliberate, reviewed change: replace the armored file, put
+the new fingerprint in the Dockerfile and in `TOOL_SOURCES.md`, and say in
+the pull request where the new key came from and how it was checked.
+Renovate does not touch these files and `Pin Only` refuses any diff that
+does, so no dependency bot can rotate a key unattended.

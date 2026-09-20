@@ -23,7 +23,8 @@ version: 2
 # up.
 #
 # Dependabot handles GitHub Actions and pre-commit hook revs when enabled;
-# Renovate handles the asdf tool versions in .tool-versions, which Dependabot
+# Renovate handles the base image tag and digest in images/base/Dockerfile,
+# which Dependabot
 # cannot parse. See renovate.json5 in this directory.
 #
 # Daily, matching Renovate and every other repository in this organization.

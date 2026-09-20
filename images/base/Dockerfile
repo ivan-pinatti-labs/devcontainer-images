@@ -2,12 +2,19 @@
 # run inside.
 #
 # It carries only what is common to all of them: git, the handful of tools
-# asdf's own plugins need, asdf itself, and a rootless container runtime for
-# the repositories whose tooling starts containers of its own. Everything a
-# repository actually pins (github-cli, pre-commit, nodejs and whatever it
-# adds later) is installed from that repository's own .tool-versions in a
-# layer on top of this one, so this image never has to know which
-# repositories exist or what they pin.
+# every repository's hooks reach for, the apt signing keys this organization
+# trusts, the two coding agent command line tools every repository is worked
+# on with, and a rootless container runtime for the repositories whose
+# tooling starts containers of its own. Everything else a repository needs
+# (github-cli, pre-commit, terraform and whatever it adds later) is installed
+# with apt in a layer on top of this one, so this image never has to know
+# which repositories exist or what they install.
+#
+# There is no version manager here. Tools come from signed package
+# repositories, so what installs them is apt, and what vouches for them is a
+# repository signature rather than a plugin's shell script. See
+# docs/TOOL_SOURCES.md for where each tool comes from and what its
+# provenance actually is.
 #
 # Ubuntu rather than debian:13-slim: measured 2026-09-14, ubuntu:24.04 is
 # 80.7 MB and debian:13-slim is 81.1 MB, so the "slim" distinction costs
@@ -26,23 +33,28 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Why each of these, since an unexplained package list grows forever:
 #
-#   ca-certificates  every download below and every plugin's own downloads
-#   curl             how asdf plugins fetch their releases
-#   git              the point of the image, and how asdf installs plugins
-#   gnupg            asdf-nodejs verifies release signatures with it
+#   ca-certificates  apt fetches every source below over https
+#   curl             used by this organization's scripts and hooks
+#   git              the point of the image
+#   gnupg            verifies and dearmors the apt signing keys further down
 #   jq               used by this organization's scripts and hooks
 #   make             most of these repositories drive their tasks with it
 #   openssh-client   git over ssh, and rsync-crypt's own test suite
 #   procps           ps, which pre-commit and several scripts shell out to
 #   python3          pre-commit runs on it
-#   tar unzip xz-utils   the archive formats asdf plugins ship in
+#   nodejs           the runtime both coding agent CLIs below are written for
+#
+# tar, unzip and xz-utils used to be here for the archive formats asdf
+# plugins shipped in. Nothing unpacks a release archive any more, so they
+# are gone; tar is an Essential package and stays present regardless.
 #
 # And the pieces that let a repository's own tooling start containers from
 # inside this one: pre-commit hooks such as hadolint-docker and
-# actionlint-docker, and a compose stack. They do nothing unless the
-# development container is started with the opt in flags docs/IMAGES.md
-# describes; without them, nesting fails and SELinux keeps confining the
-# container.
+# actionlint-docker, a compose stack, and the tflint image
+# pre-commit-checklists runs its terraform checklist through. They do
+# nothing unless the development container is started with the opt in flags
+# docs/IMAGES.md describes; without them, nesting fails and SELinux keeps
+# confining the container.
 #
 #   podman           the nested runtime, rootless like the host's
 #   podman-docker    a `docker` command that runs podman, because pre-commit's
@@ -83,10 +95,7 @@ RUN apt-get update \
     podman-docker \
     procps \
     python3 \
-    tar \
     uidmap \
-    unzip \
-    xz-utils \
   && rm -rf /var/lib/apt/lists/*
 
 # Ubuntu ships newuidmap and newgidmap setuid root, and inside a rootless
@@ -99,33 +108,160 @@ RUN chmod 0755 /usr/bin/newuidmap /usr/bin/newgidmap \
   && setcap cap_setuid=ep /usr/bin/newuidmap \
   && setcap cap_setgid=ep /usr/bin/newgidmap
 
-# asdf has been a single Go binary since 0.16, so it installs by download
-# rather than by cloning a shell repository the way older documentation
-# describes.
+# The apt signing keys this organization trusts, and nothing else about
+# those repositories.
 #
-# ASDF_SHA256 is not a value Renovate can derive, so a version bump has to
-# carry a new one. Recompute it with:
+# The keys are vendored under keyrings/ rather than downloaded here, so a
+# key changing is a diff somebody reviews in a pull request instead of
+# whatever the vendor served on the day of the build.
 #
-#   curl -fsSL https://github.com/asdf-vm/asdf/releases/download/v<version>/asdf-v<version>-linux-amd64.tar.gz \
-#     | sha256sum
+# Each file's set of primary certificates is compared against the list
+# below, exactly: every expected fingerprint must be present and no
+# unexpected one may be. Checking only that the expected fingerprint is
+# somewhere in the file would be weaker than it looks, because `gpg
+# --dearmor` installs every certificate the file holds and apt then accepts
+# repository metadata signed by any of them. A vendor that quietly added a
+# second certificate, or a tampered file that appended one, would install a
+# signer nobody reviewed while the check still passed. CodeRabbit caught
+# exactly that on this file's first version (pull request 10).
 #
-# The archive is verified before anything out of it is executed.
-# renovate: datasource=github-releases depName=asdf-vm/asdf
-ARG ASDF_VERSION=0.20.0
-ARG ASDF_SHA256=9c25e1af7cc4c9d59ff3736eba14fd000480c32929258f80d8c5a8b290ebee14
-# The checksum is written to a file and checked from it rather than piped
-# into sha256sum. A pipe would need `SHELL ["/bin/bash", "-o", "pipefail",
-# "-c"]` to avoid masking a failure on its left-hand side, and Podman's
-# default OCI image format ignores SHELL entirely (it warns and carries on),
-# so the guard would hold under Docker and quietly not under Podman, which
-# is the runtime this organization actually builds with.
-RUN curl -fsSL -o /tmp/asdf.tar.gz \
-    "https://github.com/asdf-vm/asdf/releases/download/v${ASDF_VERSION}/asdf-v${ASDF_VERSION}-linux-amd64.tar.gz" \
-  && printf '%s  %s\n' "${ASDF_SHA256}" /tmp/asdf.tar.gz > /tmp/asdf.sha256 \
-  && sha256sum --check --strict /tmp/asdf.sha256 \
-  && tar -xzf /tmp/asdf.tar.gz -C /usr/local/bin asdf \
-  && rm /tmp/asdf.tar.gz /tmp/asdf.sha256 \
-  && asdf version
+# github-cli genuinely ships two primary certificates, which is why the
+# answer is an exact set rather than a single value: GitHub rotates by
+# publishing the new certificate alongside the old one, and pinning only one
+# of them would fail verification the day they switch.
+#
+# Subkeys are deliberately not listed. A subkey is bound to its primary by a
+# signature gpg already verifies, so naming the primaries fixes the whole
+# trust chain; listing subkeys too would only mean editing this file every
+# time a vendor rotated a signing subkey under an unchanged primary.
+#
+# Installing a key grants nothing on its own: apt reads a keyring only when
+# a sources.list entry names it with signed-by=. So this image trusts these
+# three repositories in the sense that it has reviewed their keys, and pulls
+# from none of them. A repository that wants github-cli, nodejs or terraform
+# adds its own one line sources.list.d entry pointing at the keyring it
+# needs, the same way nesting is opt in per repository rather than a default
+# of the image. docs/TOOL_SOURCES.md has the exact lines.
+#
+# The comparison is a plain string equality on the last command rather than
+# something guarded by pipefail: Podman's default OCI image format ignores
+# SHELL entirely (it warns and carries on), so a pipefail guard would hold
+# under Docker and quietly not under the runtime this organization actually
+# builds with. Verified by swapping a vendored key for a freshly generated
+# one, and again by appending an extra certificate, and watching the build
+# stop both times.
+COPY keyrings/ /tmp/keyrings/
+# hadolint ignore=DL4006
+RUN set -eu; \
+  install -d -m 0755 /usr/share/keyrings; \
+  for entry in \
+      "github-cli:2C6106201985B60E6C7AC87323F3D4EA75716059,7F38BBB59D064DBCB3D84D725612B36462313325" \
+      "nodesource:6F71F525282841EEDAF851B42F59B5F99B1BE0B4" \
+      "hashicorp:D55C0D1AC78A8D8126CB631CFC9CA96ACA026560"; do \
+    name="${entry%%:*}"; \
+    want="${entry#*:}"; \
+    got="$( \
+      gpg --show-keys --with-colons "/tmp/keyrings/${name}.asc" \
+        | awk -F: '$1=="pub"{p=1;next} $1=="fpr"&&p{print $10;p=0;next} {p=0}' \
+        | sort \
+        | paste -sd, - \
+    )"; \
+    if [ "${got}" != "${want}" ]; then \
+      echo "${name}.asc: primary certificates ${got:-none} do not match the reviewed set ${want}" >&2; \
+      exit 1; \
+    fi; \
+    gpg --dearmor < "/tmp/keyrings/${name}.asc" \
+      > "/usr/share/keyrings/${name}.gpg"; \
+    chmod 0644 "/usr/share/keyrings/${name}.gpg"; \
+  done; \
+  rm -rf /tmp/keyrings
+
+# The one third party repository this image enables for itself, because it
+# installs from it: NodeSource, for the Node.js the two coding agent CLIs
+# below run on. Ubuntu's own nodejs is a major version behind what they
+# expect.
+#
+# The other two keyrings stay inert here. A repository that wants github-cli
+# or terraform adds its own source entry; see docs/TOOL_SOURCES.md.
+# hadolint ignore=DL3008
+RUN printf '%s\n' \
+      'deb [arch=amd64 signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main' \
+      > /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends nodejs \
+  && rm -rf /var/lib/apt/lists/*
+
+# The coding agent command line tools, and the reason this image carries
+# Node.js at all. Both are worked with in every repository in this
+# organization, so they belong here rather than in each one's own layer.
+#
+# Neither publishes an apt repository, from its vendor or any distribution,
+# so this is the tflint situation again with a different answer: npm is the
+# vendors' own distribution channel for both, and npm can actually be
+# verified. `npm audit signatures` checks two separate things and this build
+# fails closed on either.
+#
+#   registry signature   npm signs every tarball it serves with its own key,
+#                        so the bytes installed are the bytes the publisher
+#                        uploaded. Both packages have one.
+#   build provenance     a SLSA attestation tying the tarball to the source
+#                        commit and the workflow that built it. @openai/codex
+#                        publishes one. @anthropic-ai/claude-code does not,
+#                        measured 2026-09-19, so it carries the weaker of the
+#                        two guarantees and docs/TOOL_SOURCES.md says so
+#                        rather than letting "installed from npm" imply more
+#                        than it is.
+#
+# Pinned, unlike the apt packages, and that difference is deliberate. An apt
+# package is unpinned here because Ubuntu and these vendors ship security
+# fixes by moving a version inside a release, with a distribution maintainer
+# between upstream and this image. npm has no such gatekeeper: whatever the
+# publisher pushed is what `npm install` resolves, seconds after they push
+# it. A pin is what lets Renovate's seven day minimumReleaseAge and `Pin
+# Only` stand between a fresh npm release and this image, which is the only
+# defence that exists against a well formed malicious publish.
+#
+# The initial values are chosen to be at least seven days old at the time
+# they are introduced, which Renovate's minimumReleaseAge does not do for
+# them: that window governs updates Renovate proposes, not a version a person
+# types into this file, so a pin added by hand the day it was published would
+# walk straight past the control the pin exists to enable. CodeRabbit caught
+# that on this file's first version (pull request 10).
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
+ARG CLAUDE_CODE_VERSION=2.1.269
+# renovate: datasource=npm depName=@openai/codex
+ARG CODEX_VERSION=0.154.0
+WORKDIR /opt/agent-clis
+# --ignore-scripts, and the ordering around it, is the point of this block.
+#
+# npm runs a package's lifecycle scripts during install by default, as root
+# here, and it does that before `npm audit signatures` has had any chance to
+# say whether the tarball is the one the publisher uploaded. A tampered
+# package would therefore execute first and be rejected afterwards, which is
+# the wrong way round. So nothing is executed until everything is verified:
+# install with no scripts at all, verify, and only then run the postinstall
+# of a package that has just passed. CodeRabbit raised this as CWE-494 on
+# pull request 10.
+#
+# Only claude-code needs its script run. codex declares no lifecycle scripts
+# at all, and claude-code's postinstall does not download anything: the
+# native binary ships as a platform specific optionalDependency
+# (@anthropic-ai/claude-code-linux-x64), which npm installs and
+# `npm audit signatures` covers like any other package, and the postinstall
+# only selects and links it. Verified by reading install.cjs, which contains
+# no URL.
+RUN set -eu; \
+  npm init --yes >/dev/null; \
+  npm install --ignore-scripts --no-audit --no-fund --save-exact \
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    "@openai/codex@${CODEX_VERSION}"; \
+  npm audit signatures; \
+  npm rebuild @anthropic-ai/claude-code; \
+  ln -s /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude; \
+  ln -s /opt/agent-clis/node_modules/.bin/codex /usr/local/bin/codex; \
+  npm cache clean --force >/dev/null 2>&1 || true; \
+  claude --version; \
+  codex --version
 
 # Ubuntu's own image already ships an account at uid 1000, named 'ubuntu',
 # so creating one there fails. Renaming it keeps uid and gid 1000, which is
@@ -176,18 +312,14 @@ USER 1000:1000
 # project.
 WORKDIR /workspace
 
-# asdf resolves tools through its shims directory, which has to be on PATH
-# before anything a repository pins can be found. The sbin directories are
-# listed too: an image built FROM this one runs its own RUN steps with this
-# PATH, and without them tools such as setcap and usermod are not found by
-# name there.
+# The sbin directories are listed explicitly: an image built FROM this one
+# runs its own RUN steps with this PATH, and without them tools such as
+# setcap and usermod are not found by name there.
 ENV HOME=/home/dev \
-    ASDF_DATA_DIR=/home/dev/.asdf \
-    PATH=/home/dev/.asdf/shims:/home/dev/.asdf/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-RUN mkdir -p "${ASDF_DATA_DIR}"
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
-      org.opencontainers.image.description="Base development image for the ivan-pinatti-labs repositories: git, asdf, the tools its plugins need, and rootless Podman for nested containers." \
+      org.opencontainers.image.description="Base development image for the ivan-pinatti-labs repositories: git, the common command line tools, the Claude Code and Codex CLIs, this organization's trusted apt signing keys, and rootless Podman for nested containers." \
       org.opencontainers.image.licenses="Apache-2.0"
 
 CMD ["/bin/bash"]
