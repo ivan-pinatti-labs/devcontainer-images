@@ -126,10 +126,9 @@ side of the diff and the pull request waits for a person.
 | pre-commit | Ubuntu | distribution repository signature | 4.5.1 on 26.04, against the 4.6.2 the retired asdf pin named |
 | shellcheck | Ubuntu | distribution repository signature | 0.11.0, the same version the retired asdf pin named |
 | github-cli | `cli.github.com/packages stable main` | repository signature | 2.101.0, ahead of the retired pin |
-| nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | 24.21.0, the same version the retired pin named |
+| nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | 24.21.0, the same version the retired pin named; in the base image, because both agent CLIs run on it |
 | terraform | `apt.releases.hashicorp.com resolute main` | repository signature | 1.16.3, ahead of the retired pin |
 | tflint | `ghcr.io/terraform-linters/tflint`, pinned by digest | container image published by the project | see below |
-| nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | in the base image, the runtime both agent CLIs need |
 | claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | in the base image, see below |
 | codex (Codex CLI) | npm `@openai/codex`, version pinned | npm registry signature **and** SLSA build provenance | in the base image, see below |
 
@@ -174,6 +173,23 @@ and `@anthropic-ai/claude-code` does not. "Installed from npm" is therefore a
 weaker statement for Claude Code than for Codex, and this table exists so
 that difference is visible rather than implied.
 
+Nothing is executed before it is verified. npm runs a package's lifecycle
+scripts during install by default, as root in a build like this one, and it
+does that before `npm audit signatures` has had any chance to say whether
+the tarball is genuine. A tampered package would run first and be rejected
+afterwards, which is the wrong way round. So the build installs with
+`--ignore-scripts`, verifies, and only then runs the postinstall of a
+package that has just passed.
+
+Only Claude Code needs that postinstall. Codex declares no lifecycle scripts
+at all. Claude Code's does not download anything either, which is worth
+stating because a wrapper package that fetches a binary at install time
+would put that binary outside everything described above: the native
+executable ships as a platform specific `optionalDependency`
+(`@anthropic-ai/claude-code-linux-x64`), which npm installs and
+`npm audit signatures` covers like any other package, and the postinstall
+only selects and links it.
+
 These two are **version pinned**, which nothing installed with apt is. The
 difference is deliberate. An apt package is unpinned because Ubuntu and these
 vendors ship security fixes by moving a version inside a release, with a
@@ -183,6 +199,13 @@ seconds later. The pin is what lets Renovate's seven day `minimumReleaseAge`
 and `Pin Only` stand between a fresh npm release and this image, and it is
 the only defence that works against a release that is well formed and
 malicious.
+
+That window covers updates Renovate proposes, and nothing else. A version
+typed into the Dockerfile by hand never passes through it, so an initial pin
+added on the day it was published would walk straight past the control the
+pin exists to enable. Initial values are therefore chosen to be at least
+seven days old when they are introduced, and the same applies to anyone
+changing one by hand rather than letting Renovate do it.
 
 ## Getting a shell without an IDE
 

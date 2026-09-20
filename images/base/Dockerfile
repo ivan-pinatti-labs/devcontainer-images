@@ -221,17 +221,42 @@ RUN printf '%s\n' \
 # Only` stand between a fresh npm release and this image, which is the only
 # defence that exists against a well formed malicious publish.
 #
+# The initial values are chosen to be at least seven days old at the time
+# they are introduced, which Renovate's minimumReleaseAge does not do for
+# them: that window governs updates Renovate proposes, not a version a person
+# types into this file, so a pin added by hand the day it was published would
+# walk straight past the control the pin exists to enable. CodeRabbit caught
+# that on this file's first version (pull request 10).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.278
+ARG CLAUDE_CODE_VERSION=2.1.269
 # renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.155.1
+ARG CODEX_VERSION=0.154.0
 WORKDIR /opt/agent-clis
+# --ignore-scripts, and the ordering around it, is the point of this block.
+#
+# npm runs a package's lifecycle scripts during install by default, as root
+# here, and it does that before `npm audit signatures` has had any chance to
+# say whether the tarball is the one the publisher uploaded. A tampered
+# package would therefore execute first and be rejected afterwards, which is
+# the wrong way round. So nothing is executed until everything is verified:
+# install with no scripts at all, verify, and only then run the postinstall
+# of a package that has just passed. CodeRabbit raised this as CWE-494 on
+# pull request 10.
+#
+# Only claude-code needs its script run. codex declares no lifecycle scripts
+# at all, and claude-code's postinstall does not download anything: the
+# native binary ships as a platform specific optionalDependency
+# (@anthropic-ai/claude-code-linux-x64), which npm installs and
+# `npm audit signatures` covers like any other package, and the postinstall
+# only selects and links it. Verified by reading install.cjs, which contains
+# no URL.
 RUN set -eu; \
   npm init --yes >/dev/null; \
-  npm install --no-audit --no-fund --save-exact \
+  npm install --ignore-scripts --no-audit --no-fund --save-exact \
     "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     "@openai/codex@${CODEX_VERSION}"; \
   npm audit signatures; \
+  npm rebuild @anthropic-ai/claude-code; \
   ln -s /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude; \
   ln -s /opt/agent-clis/node_modules/.bin/codex /usr/local/bin/codex; \
   npm cache clean --force >/dev/null 2>&1 || true; \
