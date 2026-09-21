@@ -40,8 +40,21 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   jq               used by this organization's scripts and hooks
 #   make             most of these repositories drive their tasks with it
 #   openssh-client   git over ssh, and rsync-crypt's own test suite
+#   pre-commit       the hook runner every repository in this organization
+#                    uses, and the one tool the checklists cannot run without.
+#                    Measured 2026-09-20: this image plus pre-commit runs 19
+#                    of the 20 checklists pre-commit-checklists dogfoods,
+#                    because pre-commit builds its own environment for every
+#                    python, node and golang hook (it bootstraps a Go
+#                    toolchain for checkmake on its own) and the container
+#                    based hooks use the podman below. The exception is the
+#                    terraform checklist, which invokes `terraform`, `tofu`
+#                    and `tflint` by name; those stay in the one repository
+#                    that uses them rather than adding their weight, and
+#                    tofu's 253 vendored Go dependencies, to five containers
+#                    that never call them.
 #   procps           ps, which pre-commit and several scripts shell out to
-#   python3          pre-commit runs on it
+#   python3          what pre-commit and its python hook environments run on
 #   nodejs           the runtime both coding agent CLIs below are written for
 #
 # tar, unzip and xz-utils used to be here for the archive formats asdf
@@ -116,6 +129,7 @@ RUN apt-get update \
     nftables \
     openssh-client \
     passt \
+    pre-commit \
     podman \
     podman-compose \
     podman-docker \
