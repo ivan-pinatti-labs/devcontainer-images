@@ -27,8 +27,18 @@ are more specific, follow them.
 A binary that did not come from the operating system's package manager (a
 release download, an installer script, a new version under evaluation, a
 scanner, a debugging tool) runs inside a rootless Podman container, never
-directly on the host. That holds when validating,
-testing, checking a new version and debugging.
+directly on the host. That holds when validating, testing, checking a new
+version and debugging.
+
+It holds inside the development container as well, and that is the point of
+the nested runtime this image carries. Once work happens in there, "not on
+the host" becomes "not in the development container either": an unreviewed
+binary runs in a container started from inside it, isolated from the
+checkout, from the agent credentials mounted into it, and from the host.
+Only what this organization has reviewed and installed through a package
+runs in the development container itself. `podman compose` works in there
+too, so a workload worth isolating can be a whole stack rather than a single
+image.
 
 ```bash
 podman run --rm --network=none \

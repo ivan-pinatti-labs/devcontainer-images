@@ -4,9 +4,13 @@
 
 What happens between opening a pull request against this repository and it
 landing on `main`. Ported from `ivan-pinatti-labs/rsync-crypt`'s document of
-the same name, trimmed to what this repository actually has: no app code, no
-build, no test suite, and no Dockerfile, so there is no `Tests` context and
-no `Docker Build` job here, unlike that repository. Where the reasoning is
+the same name, trimmed to what this repository actually has: no app code and
+no test suite, so there is no `Tests` context here, unlike that repository.
+It does have a Dockerfile, `images/base/Dockerfile`, which is the whole point
+of the repository; an earlier version of this document claimed otherwise, and
+`scripts/assert-pin-only-diff.py` was written to match that claim, which is
+why every base image digest bump was refused as "not a dependency pin file"
+until 2026-09-19. Where the reasoning is
 identical it is only summarized, not restated; see rsync-crypt's
 `docs/MERGE_PIPELINE.md` for the fuller version this one was trimmed from,
 and `ivan-pinatti-labs/.github`'s `docs/MERGE_PIPELINE.md` for a smaller

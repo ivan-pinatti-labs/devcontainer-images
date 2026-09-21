@@ -50,11 +50,27 @@ Package versions are deliberately not pinned; `TOOL_SOURCES.md` says why.
 ## Running containers inside it
 
 Most of these repositories start containers from inside their development
-container: pre-commit's `hadolint-docker` and `actionlint-docker` hooks,
-pre-commit-checklists' tflint, and docker-torrent-box-with-vpn's whole
-stack. The image carries rootless Podman
-for that, plus a `docker` command that runs it, because pre-commit's
-`docker_image` hooks call `docker` by name.
+container: pre-commit's `hadolint-docker` and `actionlint-docker` hooks, and
+pre-commit-checklists' tflint. The image carries rootless Podman for that,
+plus a `docker` command that runs it, because pre-commit's `docker_image`
+hooks call `docker` by name, and `podman-compose` so `podman compose` (and
+therefore `docker compose`) resolves a provider.
+
+A single nested container needs only the two flags above. A nested **compose
+stack** needs the wider opt in as well, because compose gives its services a
+network and rootless networking needs `/dev/net/tun`; without it the stack
+fails with `setting up Pasta: pasta failed with exit code 1`. See "Nested
+containers with a network of their own" below, and measured both ways on
+2026-09-20: a nested container ran with the two flags, and the same compose
+stack only came up once the network opt in was added.
+
+That capability is not only for hook tooling. This organization's rule is
+that a binary it has not installed through a package runs in a container, and
+once development happens inside the development container, that means a
+container started from inside it. An unreviewed binary is isolated from the
+checkout, from the agent credentials mounted in, and from the host, where
+nothing is meant to run at all. Only reviewed, packaged tooling runs in the
+development container itself.
 
 It works when the development container runs in `container_engine_t`, the
 confined SELinux domain meant for running a container engine inside a

@@ -40,23 +40,61 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   jq               used by this organization's scripts and hooks
 #   make             most of these repositories drive their tasks with it
 #   openssh-client   git over ssh, and rsync-crypt's own test suite
+#   pre-commit       the hook runner every repository in this organization
+#                    uses, and the one tool the checklists cannot run without.
+#                    Measured 2026-09-20: this image plus pre-commit runs 19
+#                    of the 20 checklists pre-commit-checklists dogfoods,
+#                    because pre-commit builds its own environment for every
+#                    python, node and golang hook (it bootstraps a Go
+#                    toolchain for checkmake on its own) and the container
+#                    based hooks use the podman below. The exception is the
+#                    terraform checklist, which invokes `terraform`, `tofu`
+#                    and `tflint` by name; those stay in the one repository
+#                    that uses them rather than adding their weight, and
+#                    tofu's 253 vendored Go dependencies, to five containers
+#                    that never call them.
 #   procps           ps, which pre-commit and several scripts shell out to
-#   python3          pre-commit runs on it
+#   python3          what pre-commit and its python hook environments run on
 #   nodejs           the runtime both coding agent CLIs below are written for
 #
 # tar, unzip and xz-utils used to be here for the archive formats asdf
 # plugins shipped in. Nothing unpacks a release archive any more, so they
 # are gone; tar is an Essential package and stays present regardless.
 #
-# And the pieces that let a repository's own tooling start containers from
-# inside this one: pre-commit hooks such as hadolint-docker and
-# actionlint-docker, a compose stack, and the tflint image
-# pre-commit-checklists runs its terraform checklist through. They do
-# nothing unless the development container is started with the opt in flags
-# docs/IMAGES.md describes; without them, nesting fails and SELinux keeps
-# confining the container.
+# And the pieces that let containers run from inside this one.
+#
+# This is not only for a repository's own tooling (pre-commit hooks such as
+# hadolint-docker and actionlint-docker, or the tflint image
+# pre-commit-checklists runs its terraform checklist through). It is how this
+# organization's standing rule holds once development happens in here:
+# a binary that did not come from the distribution runs in a container, not
+# directly on the machine. Inside a development container that means a nested
+# container, so an unreviewed binary is isolated from the checkout, the agent
+# credentials and the host alike. Nothing is meant to be run on the host at
+# all.
+#
+# podman-compose is here for the same reason rather than for any one
+# repository: a workload worth isolating is as likely to be a compose stack
+# as a single image, and `podman compose` delegates to an external provider
+# and fails without one ("looking up compose provider failed"). Installing it
+# also answers `docker compose`, because podman-docker's shim maps that onto
+# `podman compose`, so podman stays the runtime and docker remains only a
+# fallback name for tools that hardcode it.
+#
+# podman-compose rather than docker-compose-v2, which Ubuntu also packages:
+# the latter validates more strictly and rejects shapes the compose files in
+# this organization actually use, such as an interpolated `depends_on` key
+# inside an included file. Measured against docker-torrent-box-with-vpn's
+# stack on 2026-09-20, where docker-compose-v2 refused what podman-compose
+# parsed.
+#
+# These do nothing unless the development container is started with the opt
+# in flags docs/IMAGES.md describes; without them, nesting fails and SELinux
+# keeps confining the container.
 #
 #   podman           the nested runtime, rootless like the host's
+#   podman-compose   the compose provider `podman compose` delegates to, so a
+#                    nested workload can be a whole stack
 #   podman-docker    a `docker` command that runs podman, because pre-commit's
 #                    docker_image hooks call `docker` by name
 #   crun catatonit   the OCI runtime podman uses, and the init it runs under
@@ -91,7 +129,9 @@ RUN apt-get update \
     nftables \
     openssh-client \
     passt \
+    pre-commit \
     podman \
+    podman-compose \
     podman-docker \
     procps \
     python3 \
