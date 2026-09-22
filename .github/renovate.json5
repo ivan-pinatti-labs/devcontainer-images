@@ -64,7 +64,7 @@
   // top of that floor.
   //
   // A pin-only bump resolves `Review Verified` through
-  // `coderabbit-review-verdict.py`'s bot lane without CodeRabbit ever being
+  // the shared review verdict's bot lane without CodeRabbit ever being
   // asked, so a daily schedule consumes no extra review quota; see
   // ivan-pinatti-labs/.github's README.md under "Dependency policy".
   schedule: ["before 7am"],
@@ -236,7 +236,7 @@
     // rsync-crypt's own PR #82 proved live there, proposing 3.13 to 3.14
     // with no way to ever merge it. Dependabot's github-actions ecosystem
     // never watched this shape either, it bumped uses: pins only, and
-    // scripts/assert-pin-only-diff.py's REV_PIN and ACTION_SHA patterns do
+    // the shared pin-only check's rev_pin and action_sha grammars do
     // not match a with: input, so Pin Only would refuse a diff like this
     // and route it to a person every single time upstream Python cuts a
     // release, forever, since the shape never changes. Disabled here so
