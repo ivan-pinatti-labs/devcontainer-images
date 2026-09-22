@@ -1,5 +1,14 @@
 ---
-# Reproduces devcontainer-images' scripts/assert-pin-only-diff.py exactly.
+# What a dependency bot may change here without a person reading the diff.
+# Read by the shared `Pin Only` check in ivan-pinatti-labs/gh-actions, which
+# reads it from the default branch rather than from the pull request being
+# graded. This file is deliberately absent from its own allowed_paths, so a
+# bot cannot widen its own lane.
+#
+# Reproduces the scripts/assert-pin-only-diff.py this replaced, exactly.
+# Unlike every other repository here the block scalar exemption is not
+# scoped to .github/workflows/: it applies on every path, which is why the
+# three action grammars carry it as default_grammars rather than as a rule.
 allowed_paths:
   - .pre-commit-config.yaml
   - .github/workflows/
