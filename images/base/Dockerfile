@@ -268,7 +268,7 @@ RUN printf '%s\n' \
 # walk straight past the control the pin exists to enable. CodeRabbit caught
 # that on this file's first version (pull request 10).
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.273
+ARG CLAUDE_CODE_VERSION=2.1.274
 # renovate: datasource=npm depName=@openai/codex
 ARG CODEX_VERSION=0.154.0
 WORKDIR /opt/agent-clis
