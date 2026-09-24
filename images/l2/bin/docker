@@ -1,0 +1,104 @@
+#!/bin/sh
+: '
+  Stand in for `docker` inside L2.
+
+  pre-commit hooks of `language: docker_image` (hadolint-docker,
+  actionlint-docker) and a few local hooks call `docker run <image> ...`. A
+  container cannot start another container from inside L2, so this runs the
+  binary that image would have run, which the L2 Dockerfile copied out of
+  that same official image. The environment variable L2_BAKED_IMAGES lists
+  which images are covered and at which version.
+
+  Only `docker run` is understood. Anything else, an image that is not baked,
+  or a baked image at a different version, fails with a message saying so.
+
+  Exit status codes:
+    125  not a `docker run` this can answer
+    any  otherwise, the exit status of the tool itself
+'
+
+set -o errexit
+set -o nounset
+
+die() {
+  echo "l2 docker: $*" >&2
+  echo "l2 docker: L2 cannot start containers; see docs/LAYERS.md, \"Container based hooks\"." >&2
+  exit 125
+}
+
+# pre-commit asks whether the runtime is rootless before deciding whether to
+# pass --user. The answer that matches L2 is yes.
+if [ "${1:-}" = system ] && [ "${2:-}" = info ]; then
+  echo '{"SecurityOptions": ["name=rootless"]}'
+  exit 0
+fi
+
+[ "${1:-}" = run ] || die "only 'docker run' is supported here, not '${1:-}'"
+shift
+
+workdir=""
+mounts=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --rm | -i | -t | -it | --interactive | --tty | --init) shift ;;
+    -v | --volume) mounts="${mounts}
+$2"; shift 2 ;;
+    --volume=*) mounts="${mounts}
+${1#--volume=}"; shift ;;
+    -w | --workdir) workdir="$2"; shift 2 ;;
+    --workdir=*) workdir="${1#--workdir=}"; shift ;;
+    -u | --user | -e | --env | --network | --name | --entrypoint | --platform | --security-opt) shift 2 ;;
+    --*=*) shift ;;
+    -*) die "unsupported option $1" ;;
+    *) break ;;
+  esac
+done
+
+[ $# -gt 0 ] || die "no image given"
+image="$1"
+shift
+
+name="${image%@*}"
+case "${name##*/}" in
+  *:*) tag="${name##*:}"; name="${name%:*}" ;;
+  *) tag="" ;;
+esac
+
+baked=""
+for entry in ${L2_BAKED_IMAGES:-}; do
+  if [ "${entry%%=*}" = "${name}" ]; then
+    baked="${entry#*=}"
+  fi
+done
+[ -n "${baked}" ] || die "image ${name} is not baked into this L2 image"
+if [ -n "${tag}" ] && [ "${tag}" != "${baked}" ]; then
+  die "hook asks for ${name}:${tag} but this L2 image carries ${baked}; rebuild L2 with the new version"
+fi
+
+# Translate the container's working directory back to the path it was mounted
+# from, so relative file arguments resolve the same way.
+if [ -n "${workdir}" ]; then
+  host_dir=""
+  old_ifs="${IFS}"
+  IFS='
+'
+  for m in ${mounts}; do
+    src="${m%%:*}"
+    rest="${m#*:}"
+    dst="${rest%%:*}"
+    case "${workdir}" in
+      "${dst}") host_dir="${src}" ;;
+      "${dst}"/*) host_dir="${src}${workdir#"${dst}"}" ;;
+    esac
+  done
+  IFS="${old_ifs}"
+  [ -n "${host_dir}" ] || die "working directory ${workdir} is not inside a mounted volume"
+  cd "${host_dir}"
+fi
+
+case "${name##*/}" in
+  hadolint) exec "$@" ;;
+  actionlint) exec actionlint "$@" ;;
+  dotenv-linter) exec dotenv-linter "$@" ;;
+esac
+die "no command mapping for ${name}"

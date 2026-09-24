@@ -1,0 +1,37 @@
+{
+  "allowManagedHooksOnly": true,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/libexec/workbench/route-to-l2"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "ask": ["Bash(podman:*)", "Bash(l2 --image:*)"],
+    "deny": [
+      "Read(/home/dev/.claude/.credentials.json)",
+      "Read(/home/dev/.codex/auth.json)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "enableWeakerNestedSandbox": true,
+    "excludedCommands": ["l2 *", "git *", "podman *"],
+    "network": {
+      "allowUnixSockets": [
+        "/run/gh-broker/gh.sock",
+        "/run/devcontainer-ssh/agent.sock"
+      ]
+    }
+  },
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

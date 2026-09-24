@@ -1,0 +1,55 @@
+#!/usr/bin/python3
+"""Install every hook environment a commit will need, while network is allowed.
+
+The workbench's git hooks call this with network (through the egress proxy)
+and a read only working tree, then run the hooks themselves with no network.
+`pre-commit install-hooks` alone is not enough in this organization: each
+checklist-* hook from pre-commit-checklists runs a nested `pre-commit run`
+against a checklist file of its own, whose hook repositories would otherwise
+be fetched during the hook run, when there is no network. So after the
+repository's own hooks, this installs the environments of every checklist the
+repository's configuration names.
+
+Exit status codes:
+  1    a `pre-commit install-hooks` failed (its output says why)
+"""
+import os
+import sqlite3
+import subprocess
+import sys
+
+import yaml
+
+CONFIG = ".pre-commit-config.yaml"
+
+
+def run(args):
+    p = subprocess.run(["pre-commit", *args], capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.stderr.write(p.stdout + p.stderr)
+        sys.exit(1)
+
+
+def main():
+    run(["install-hooks", "--config", CONFIG])
+    config = yaml.safe_load(open(CONFIG)) or {}
+    store = os.path.join(os.environ.get("PRE_COMMIT_HOME") or os.path.expanduser("~/.cache/pre-commit"), "db.db")
+    if not os.path.exists(store):
+        return 0
+    db = sqlite3.connect(store)
+    for repo in config.get("repos", []):
+        ids = [h.get("id", "") for h in repo.get("hooks", [])]
+        if not any(i.startswith("checklist-") for i in ids) or repo.get("repo") in ("local", "meta"):
+            continue
+        row = db.execute("SELECT path FROM repos WHERE repo = ? AND ref = ?", (repo["repo"], repo.get("rev"))).fetchone()
+        if not row:
+            continue
+        for i in ids:
+            nested = os.path.join(row[0], "checklists", f"{i}.yaml")
+            if os.path.exists(nested):
+                run(["install-hooks", "--config", nested])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

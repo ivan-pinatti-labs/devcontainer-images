@@ -1,0 +1,28 @@
+# The gh broker: the only place the GitHub token lives.
+#
+# It runs beside the workbench, receives gh command lines over a unix socket
+# from the workbench's gh shim, runs the ones on its allowlist with the real gh
+# and the token, and returns their output. The workbench, and anything running
+# in it (an agent, an extension), can use GitHub through it, but can never
+# read the token itself. docs/LAYERS.md, "GitHub access".
+ARG BASE_IMAGE=localhost/devcontainer-base:local
+# hadolint ignore=DL3006
+FROM ${BASE_IMAGE}
+USER 0:0
+# hadolint ignore=DL3008
+RUN printf '%s\n' \
+      'deb [arch=amd64 signed-by=/usr/share/keyrings/github-cli.gpg] https://cli.github.com/packages stable main' \
+      > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends gh \
+  && rm -rf /var/lib/apt/lists/*
+COPY broker.py /usr/local/libexec/gh-broker/broker.py
+COPY allowlist.json /etc/gh-broker/allowlist.json
+USER 1000:1000
+ENV GH_PROMPT_DISABLED=1 \
+    GH_NO_UPDATE_NOTIFIER=1 \
+    GH_BROKER_SOCK=/run/gh-broker/gh.sock
+LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
+      org.opencontainers.image.description="Holds the GitHub token and runs allowlisted gh commands for the ivan-pinatti-labs workbench." \
+      org.opencontainers.image.licenses="Apache-2.0"
+CMD ["python3", "/usr/local/libexec/gh-broker/broker.py"]

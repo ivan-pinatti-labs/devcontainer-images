@@ -1,0 +1,103 @@
+#!/bin/bash
+: '
+  Run a command in L2: a throwaway container with no network, no credentials
+  and only the working tree mounted. docs/LAYERS.md explains the layers.
+
+  Usage:
+    l2 [--net] [--ro] [--protected-rw] [--image IMAGE] [--] COMMAND [ARGS...]
+
+  Options:
+    --net     give the container network access, through the egress proxy
+              only (installs: pip, npm, pre-commit install-hooks)
+    --ro      mount the working tree read only
+    --protected-rw
+              leave PROTECTED writable too. Only for the git hooks, which
+              compare those paths before and after and refuse a commit a
+              hook changed them in (formatters open files for writing even
+              when they change nothing)
+    --image   the L2 image to use. Default: the first line of
+              .devcontainer/l2-image in the repository, else $L2_IMAGE
+
+  What the container gets:
+    - the working tree at its own path, read write unless --ro
+    - the repository git directory, read write, because git needs its index,
+      but with .git/config and .git/hooks read only on top: those are the two
+      places a hook could plant code that later runs in the workbench
+      (core.fsmonitor, core.hooksPath, a hook script)
+    - the paths in PROTECTED below read only, because the workbench or the
+      host execute them (devcontainer.json runs initializeCommand on the host)
+    - a per repository volume at /root for pre-commit environments and caches
+    - nothing from the environment except the proxy variables with --net
+
+  Exit status codes:
+    2    usage error
+    any  otherwise, the exit status of COMMAND
+'
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+PROTECTED=(.devcontainer .vscode .claude .codex Makefile host)
+
+net=false
+ro=false
+protect=true
+image=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --net) net=true; shift ;;
+    --ro) ro=true; shift ;;
+    --protected-rw) protect=false; shift ;;
+    --image) image="$2"; shift 2 ;;
+    --) shift; break ;;
+    -h | --help) sed -n '3,30p' "$0"; exit 0 ;;
+    -*) echo "l2: unknown option $1" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+[ $# -gt 0 ] || { echo "l2: no command given" >&2; exit 2; }
+
+mode=rw
+[ "${ro}" = true ] && mode=ro
+
+args=(run --rm --interactive --user 0:0 --cap-drop=all --security-opt no-new-privileges)
+[ -t 0 ] && [ -t 1 ] && args+=(--tty)
+
+if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  gitdir="$(git rev-parse --path-format=absolute --git-dir)"
+  args+=(-v "${top}:${top}:${mode}")
+  case "${common}/" in
+    "${top}"/*) ;;
+    *) args+=(-v "${common}:${common}:rw") ;;
+  esac
+  args+=(-v "${common}/config:${common}/config:ro")
+  mkdir -p "${common}/hooks"
+  args+=(-v "${common}/hooks:${common}/hooks:ro")
+  [ -f "${gitdir}/config.worktree" ] && args+=(-v "${gitdir}/config.worktree:${gitdir}/config.worktree:ro")
+  if [ "${protect}" = true ]; then
+    for p in "${PROTECTED[@]}"; do
+      [ -e "${top}/${p}" ] && args+=(-v "${top}/${p}:${top}/${p}:ro")
+    done
+  fi
+  key="$(basename "$(dirname "${common}")")"
+  [ -n "${image}" ] || { [ -f "${top}/.devcontainer/l2-image" ] && image="$(head -n1 "${top}/.devcontainer/l2-image")"; }
+else
+  top="${PWD}"
+  args+=(-v "${top}:${top}:${mode}")
+  key="$(basename "${top}")"
+fi
+image="${image:-${L2_IMAGE:?l2: no image, set L2_IMAGE or .devcontainer/l2-image}}"
+
+args+=(-v "l2-home-${key//[^A-Za-z0-9_.-]/_}:/root" -w "${PWD}")
+
+if [ "${net}" = true ]; then
+  for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy NODE_USE_ENV_PROXY; do
+    [ -n "${!v:-}" ] && args+=(-e "${v}=${!v}")
+  done
+else
+  args+=(--network=none --http-proxy=false)
+fi
+
+exec podman "${args[@]}" "${image}" "$@"

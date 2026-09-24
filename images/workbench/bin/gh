@@ -1,0 +1,37 @@
+#!/usr/bin/python3
+"""gh, answered by the gh broker.
+
+The workbench holds no GitHub token. This sends the command line and the
+current directory to the gh broker over a unix socket; the broker runs the
+real gh with the token if the command is on its allowlist, and returns the
+output and exit status. See docs/LAYERS.md, "GitHub access".
+
+Interactive prompts are not available: pass the flags a prompt would ask for
+(--title, --body or --body-file, --head, --base).
+
+Exit status codes:
+  126  the broker refused the command (not on its allowlist)
+  127  the broker is not reachable
+  any  otherwise, the exit status of gh itself
+"""
+import json
+import os
+import socket
+import sys
+
+path = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
+try:
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(path)
+except OSError as e:
+    sys.stderr.write(
+        f"gh: the gh broker is not reachable at {path} ({e.strerror}).\n"
+        "gh: start the helpers on the host: host/workbench up\n")
+    sys.exit(127)
+stdin = "" if sys.stdin.isatty() else sys.stdin.read()
+s.sendall((json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": stdin}) + "\n").encode())
+s.shutdown(socket.SHUT_WR)
+reply = json.loads(b"".join(iter(lambda: s.recv(65536), b"")) or b'{"rc":1,"out":"","err":"gh: empty reply from broker\\n"}')
+sys.stdout.write(reply["out"])
+sys.stderr.write(reply["err"])
+sys.exit(reply["rc"])
