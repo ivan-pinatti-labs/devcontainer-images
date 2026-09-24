@@ -85,7 +85,12 @@ def main():
     if not routed:
         return 0
     l2 = "l2 --net --" if net else "l2 --"
-    wrapped = f"{l2} bash -c {shlex.quote(command)}"
+    words = next(segments(command), [])
+    if words and words[0] == "pre-commit" and not net and len(list(segments(command))) == 1:
+        # pre-commit gets the protected path check the git hooks use.
+        wrapped = "l2-pre-commit " + " ".join(shlex.quote(w) for w in words[1:])
+    else:
+        wrapped = f"{l2} bash -c {shlex.quote(command)}"
     reason = ("Runs project code, so it goes to L2 (no credentials, "
               + ("network through the egress proxy only)." if net else "no network)."))
     if deny_mode:

@@ -88,16 +88,40 @@ workbench's default).
   directory is not an option: pre-commit then fails to write `index.lock`
   (measured 2026-09-24).
 - `.devcontainer`, `.vscode`, `.claude`, `.codex`, `Makefile` and `host`
-  read only, because the workbench or the host execute them. A formatter hook
-  that wants to fix one of these fails with "Read-only file system"; fix
-  that file by hand.
+  read only, because the workbench or the host execute them.
 - `/root` on a volume per repository, which is where pre-commit keeps its
   hook environments.
 
-The git hooks `l2-hooks-install` writes first install or confirm the hook
-environments (`l2 --net --ro`, a quick no-op once they exist), then run the
-hooks with no network. Measured cost: 0.2 seconds for a small commit, the
-same as running pre-commit directly.
+### pre-commit
+
+`l2-pre-commit` is pre-commit run in L2, and what the git hooks
+`l2-hooks-install` writes call. Before each run the hook environments are
+installed or confirmed (`l2 --net --ro -- l2-prepare-hooks`, a quick no-op
+once they exist, and it also installs what the pre-commit-checklists hooks
+run in their own nested pre-commit). Then the hooks run with no network.
+
+Formatters open files for writing even when they change nothing, so during a
+pre-commit run the protected paths above are writable. They are compared
+before and after instead, and a run in which a hook actually changed one
+fails, naming the files. Measured 2026-09-24 with a hostile test hook: its
+rewrite of `.devcontainer/devcontainer.json` was caught, its write to
+`.git/config` refused, and it saw no token.
+
+Hooks that only work with the open internet (`markdown-link-check`,
+`lychee`) are skipped in local runs and left to CI. `L2_SKIP_HOOKS`
+overrides that list.
+
+Measured cost on 2026-09-24: gh-actions' 44 hooks over every file in 4
+seconds; a first install of all hook environments 44 seconds, then 2.
+
+### Tests
+
+A test suite runs in L2 like any other command, from the repository's own L2
+image: gh-actions' 261 tests ran there in 18 seconds with no network. A step
+that needs GitHub (a fixture fetched with `gh`) runs in the workbench first,
+through the broker; L2 never gets the broker, because that would hand GitHub
+access to the code under test. A suite that starts containers of its own
+runs from the workbench, whose containers are L2 in all but name.
 
 ### Container based hooks
 
@@ -107,6 +131,13 @@ upstream ships only as images (hadolint, actionlint, dotenv-linter) are
 therefore copied out of their official images into the L2 image, and L2's
 `docker` command runs them for the hooks that still call `docker run`. A
 hook asking for a version the image does not carry fails and says so.
+
+actionlint runs as an account of its own inside L2. v1.7.12 deadlocks when a
+`run:` script is larger than the pipe capacity left to the calling uid
+(upstream rhysd/actionlint#702), and L2 runs as your host uid, which usually
+has little left: on gh-actions it hung past 60 seconds as that uid and
+finished at once as nobody. That is why L2 keeps the `setuid` and `setgid`
+capabilities, which act only inside its own user namespace.
 
 ## The coding agents
 

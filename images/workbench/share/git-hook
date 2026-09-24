@@ -3,8 +3,8 @@
 # (no network, no credentials) instead of in the workbench.
 #
 # First the hook environments are installed or confirmed, with network through
-# the egress proxy and the working tree read only. That is a quick no-op once
-# they exist. Then the hooks themselves run with no network at all.
+# the egress proxy and the working tree read only; a quick no-op once they
+# exist. Then l2-pre-commit runs the hooks with no network at all.
 #
 # Outside the workbench there is no `l2`. Git hooks are shared by every
 # checkout of a clone, so the hook that was here before (kept as
@@ -22,24 +22,4 @@ if ! out="$(l2 --net --ro -- l2-prepare-hooks 2>&1)"; then
   printf '%s\n' "${out}" >&2
   exit 1
 fi
-
-# Paths the workbench or the host execute. Hooks may write them (formatters
-# open files for writing even when they change nothing), but a commit where a
-# hook actually changed one is refused, so nothing lands there unseen.
-protected() {
-  for p in .devcontainer .vscode .claude .codex Makefile host; do
-    [ -e "${p}" ] && find "${p}" -type f -exec sha256sum {} + 2>/dev/null
-  done | sort
-}
-before="$(protected)"
-status=0
-l2 --protected-rw -- pre-commit hook-impl --config=.pre-commit-config.yaml --hook-type=@HOOK_TYPE@ --hook-dir "${hook_dir}" -- "$@" || status=$?
-after="$(protected)"
-if [ "${before}" != "${after}" ]; then
-  echo "" >&2
-  echo "@HOOK_TYPE@: a hook changed files the workbench or the host execute:" >&2
-  printf '%s\n' "${before}" "${after}" | sort | uniq -u | awk '{print "  " $2}' | sort -u >&2
-  echo "@HOOK_TYPE@: review them (git diff) before committing again." >&2
-  exit 1
-fi
-exit "${status}"
+exec l2-pre-commit hook-impl --config=.pre-commit-config.yaml --hook-type=@HOOK_TYPE@ --hook-dir "${hook_dir}" -- "$@"

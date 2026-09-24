@@ -133,7 +133,7 @@ RUN install -m 0644 /tmp/containers/containers.conf /tmp/containers/storage.conf
 
 # The workbench's own tools, and the policies neither agent can edit: root
 # owned and read only to the dev account.
-COPY bin/l2 bin/l2-hooks-install bin/gh /usr/local/bin/
+COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh /usr/local/bin/
 COPY bin/route-to-l2 /usr/local/libexec/workbench/route-to-l2
 COPY share/git-hook /usr/local/share/workbench/git-hook
 COPY claude/managed-settings.json /etc/claude-code/managed-settings.json

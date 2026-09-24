@@ -4,7 +4,7 @@
   and only the working tree mounted. docs/LAYERS.md explains the layers.
 
   Usage:
-    l2 [--net] [--ro] [--protected-rw] [--image IMAGE] [--] COMMAND [ARGS...]
+    l2 [--net] [--ro] [--protected-rw] [--env NAME=VALUE] [--image IMAGE] [--] COMMAND [ARGS...]
 
   Options:
     --net     give the container network access, through the egress proxy
@@ -15,6 +15,8 @@
               compare those paths before and after and refuse a commit a
               hook changed them in (formatters open files for writing even
               when they change nothing)
+    --env     pass one environment variable in (repeatable); nothing else
+              from the workbench environment is passed
     --image   the L2 image to use. Default: the first line of
               .devcontainer/l2-image in the repository, else $L2_IMAGE
 
@@ -44,12 +46,14 @@ net=false
 ro=false
 protect=true
 image=""
+envs=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --net) net=true; shift ;;
     --ro) ro=true; shift ;;
     --protected-rw) protect=false; shift ;;
     --image) image="$2"; shift 2 ;;
+    --env) envs+=(-e "$2"); shift 2 ;;
     --) shift; break ;;
     -h | --help) sed -n '3,30p' "$0"; exit 0 ;;
     -*) echo "l2: unknown option $1" >&2; exit 2 ;;
@@ -61,7 +65,9 @@ done
 mode=rw
 [ "${ro}" = true ] && mode=ro
 
-args=(run --rm --interactive --user 0:0 --cap-drop=all --security-opt no-new-privileges)
+# setuid and setgid only act inside L2's own user namespace; bin/actionlint in
+# the L2 image needs them to step around an upstream deadlock.
+args=(run --rm --interactive --user 0:0 --cap-drop=all --cap-add=setuid --cap-add=setgid --security-opt no-new-privileges)
 [ -t 0 ] && [ -t 1 ] && args+=(--tty)
 
 if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -100,4 +106,4 @@ else
   args+=(--network=none --http-proxy=false)
 fi
 
-exec podman "${args[@]}" "${image}" "$@"
+exec podman "${args[@]}" "${envs[@]}" "${image}" "$@"

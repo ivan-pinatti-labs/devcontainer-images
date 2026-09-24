@@ -51,7 +51,7 @@ RUN printf '%s\n' \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=hadolint /bin/hadolint /usr/local/bin/hadolint
-COPY --from=actionlint /usr/local/bin/actionlint /usr/local/bin/actionlint
+COPY --from=actionlint /usr/local/bin/actionlint /usr/local/lib/l2/actionlint
 COPY --from=dotenv-linter /dotenv-linter /usr/local/bin/dotenv-linter
 
 # Which image version each baked binary stands in for. bin/docker refuses a
@@ -59,7 +59,7 @@ COPY --from=dotenv-linter /dotenv-linter /usr/local/bin/dotenv-linter
 # caught up with fails loudly instead of linting with the wrong release.
 ENV L2_BAKED_IMAGES="ghcr.io/hadolint/hadolint=v2.15.1 docker.io/rhysd/actionlint=1.7.12 docker.io/dotenvlinter/dotenv-linter=4.0.0"
 
-COPY bin/docker bin/l2-prepare-hooks /usr/local/bin/
+COPY bin/docker bin/l2-prepare-hooks bin/actionlint /usr/local/bin/
 
 # The L2 wrapper runs everything here as uid 0 (--user 0:0, overriding the
 # USER below), which inside the workbench's

@@ -9,7 +9,8 @@
     host/workbench unlock           add the ssh key to the agent for 8 hours
     host/workbench shell [WORKSPACE]
                                     a shell in the running workbench
-    host/workbench load-l2          copy the local L2 image into the workbench
+    host/workbench load-l2 [WORKSPACE]
+                                    copy the local L2 images into the workbench
     host/workbench status           what is running
     host/workbench down [WORKSPACE] stop the workbench and the helpers
 
@@ -22,7 +23,7 @@
         separate from your own ~/.claude and ~/.codex
     ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket
     ${XDG_RUNTIME_DIR}/devcontainer-ssh       the ssh-agent socket, known_hosts
-    podman volume workbench-containers        L2 images inside the workbench
+    podman volume workbench-containers-<name> L2 images inside each workbench
 
   Exit status codes:
     1  a prerequisite is missing (the message says which)
@@ -101,7 +102,7 @@ start_broker() {
     --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
     --secret gh-devcontainer,type=env,target=GH_TOKEN \
     -v "${GH_DIR}:/run/gh-broker:Z" \
-    -v "${ws}:${ws}:ro" \
+    -v "$(dirname "${ws}"):$(dirname "${ws}"):ro" \
     "${BROKER_IMAGE}" >/dev/null
 }
 
@@ -133,7 +134,7 @@ start_workbench() {
   name="$(wb_name "${ws}")"
   running "${name}" && return
   mkdir -p "${DATA}/claude" "${DATA}/codex"
-  podman volume exists workbench-containers || podman volume create workbench-containers >/dev/null
+  podman volume exists "${name}-containers" || podman volume create "${name}-containers" >/dev/null
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" \
@@ -150,7 +151,7 @@ start_workbench() {
     -v "${DATA}/codex:/home/dev/.codex:Z" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
-    -v workbench-containers:/home/dev/.local/share/containers \
+    -v "${name}-containers:/home/dev/.local/share/containers" \
     -w "${ws}" \
     --entrypoint catatonit "${WB_IMAGE}" -- sleep infinity >/dev/null
 }
@@ -184,10 +185,13 @@ cmd_shell() {
 }
 
 cmd_load_l2() {
-  local name
-  name="$(podman ps --filter label=workbench.workspace --format '{{.Names}}' | head -n1)"
-  [ -n "${name}" ] || die "no workbench running; host/workbench up first"
-  podman save "${L2_IMAGE}" | podman exec -i "${name}" podman load
+  local ws name image
+  ws="$(workspace "${1:-}")"
+  name="$(wb_name "${ws}")"
+  running "${name}" || die "no workbench running for ${ws}; host/workbench up first"
+  for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
+    podman save "${image}" | podman exec -i "${name}" podman load
+  done
 }
 
 cmd_status() {
@@ -207,7 +211,7 @@ case "${1:-}" in
   up) cmd_up "${2:-}" ;;
   unlock) cmd_unlock ;;
   shell) cmd_shell "${2:-}" ;;
-  load-l2) cmd_load_l2 ;;
+  load-l2) cmd_load_l2 "${2:-}" ;;
   status) cmd_status ;;
   down) cmd_down "${2:-}" ;;
   -h | --help | help) sed -n '3,30p' "$0" ;;
