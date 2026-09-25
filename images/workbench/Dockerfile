@@ -93,6 +93,7 @@ ARG CLAUDE_CODE_VERSION=2.1.276
 ARG CODEX_VERSION=0.155.0
 WORKDIR /opt/agent-clis
 RUN set -eu; \
+  export HOME=/root npm_config_cache=/tmp/npm-cache; \
   npm init --yes >/dev/null; \
   npm install --ignore-scripts --no-audit --no-fund --save-exact \
     "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
@@ -101,9 +102,11 @@ RUN set -eu; \
   npm rebuild @anthropic-ai/claude-code; \
   ln -s /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude; \
   ln -s /opt/agent-clis/node_modules/.bin/codex /usr/local/bin/codex; \
-  npm cache clean --force >/dev/null 2>&1 || true; \
-  claude --version; \
-  codex --version
+  rm -rf /tmp/npm-cache; \
+  mkdir -p /tmp/version-check/.codex; \
+  HOME=/tmp/version-check CODEX_HOME=/tmp/version-check/.codex claude --version; \
+  HOME=/tmp/version-check CODEX_HOME=/tmp/version-check/.codex codex --version; \
+  rm -rf /tmp/version-check
 
 # The workbench's own tools, and the policies neither agent can edit: root
 # owned and read only to the dev account.
@@ -123,6 +126,17 @@ RUN ln -s /opt/vscode-extensions /home/dev/.vscode-server/extensions \
   && install -d -o 1000 -g 1000 /home/dev/.claude /home/dev/.codex \
   && chown -R 1000:1000 /home/dev/.vscode-server \
   && chown -h 1000:1000 /home/dev/.vscode-server/extensions
+
+# Everything under the dev account's home belongs to it, apart from the link
+# to the read only extensions. A root owned leftover from a build step (a
+# cache, a tool's first run) would break that tool for dev at run time.
+RUN set -eu; \
+  left="$(find /home/dev ! -user dev ! -path /home/dev/.vscode-server/extensions)"; \
+  if [ -n "${left}" ]; then \
+    echo "root owned paths under /home/dev:" >&2; \
+    echo "${left}" >&2; \
+    exit 1; \
+  fi
 
 USER 1000:1000
 WORKDIR /workspace
