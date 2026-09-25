@@ -104,6 +104,7 @@
     "nounset",
     "npmjs",
     "ocsp",
+    "oneshot",
     "opentofu",
     "overlayfs",
     "passt",

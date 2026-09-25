@@ -14,10 +14,18 @@
                                     copy the local L2 images into the L2 engine
     host/workbench status           what is running
     host/workbench down [WORKSPACE] stop that workspace and the helpers
+    host/workbench helpers          start only the helpers (proxy, broker,
+                                    ssh-agent); what the login unit runs
+    host/workbench helpers-down     stop only the helpers
+    host/workbench install-units    install a systemd user unit that starts
+                                    the helpers at login (changes your
+                                    ~/.config/systemd/user; run it yourself)
 
   WORKSPACE is the folder mounted into the workbench and the L2 engine, at its
   own path. Default: the main clone of the git repository you are in (so its
-  worktrees are included), else the current directory.
+  worktrees are included), else the current directory. Workspaces live under
+  WORKBENCH_ROOT (default: the folder holding this clone), which the gh
+  broker sees read only, so gh finds the repository a command ran in.
 
   A workspace can opt in to more for its L2 engine, by listing profile names
   in .devcontainer/workbench-profile (one per line), read from the checkout
@@ -62,12 +70,14 @@ NET=workbench-egress
 SUBNET=10.203.77.0/24
 PROXY_IP=10.203.77.2
 PROXY="http://${PROXY_IP}:8888"
+# shellcheck disable=SC2054 # the commas are inside NO_PROXY's value
 PROXY_ENV=(
   -e HTTPS_PROXY="${PROXY}" -e HTTP_PROXY="${PROXY}" -e NO_PROXY=localhost,127.0.0.1
   -e https_proxy="${PROXY}" -e http_proxy="${PROXY}" -e no_proxy=localhost,127.0.0.1
 )
 # Every container that talks over a socket to another runs in the same SELinux
 # domain and category, or the connection is refused.
+# shellcheck disable=SC2054 # the comma is inside the SELinux level
 LABEL_OPTS=(--security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666)
 
 DATA="${XDG_DATA_HOME:-${HOME}/.local/share}/workbench"
@@ -76,6 +86,10 @@ GH_DIR="${RUN}/workbench/gh"
 SSH_DIR="${RUN}/devcontainer-ssh"
 SSH_KEY_DIR="${HOME}/.ssh/devcontainer"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
+# The folder holding this repository's main clone, even when this script runs
+# from one of its worktrees.
+MAIN="$(dirname "$(git -C "${HERE}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "${HERE}/.git")")"
+ROOT="${WORKBENCH_ROOT:-$(dirname "${MAIN}")}"
 
 die() { echo "workbench: $*" >&2; exit 1; }
 running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
@@ -107,7 +121,8 @@ profile_source() {
 }
 
 profiles() {
-  local f="$(profile_source "$1")/.devcontainer/workbench-profile" p
+  local f p
+  f="$(profile_source "$1")/.devcontainer/workbench-profile"
   [ -f "${f}" ] || return 0
   while read -r p; do
     case "${p}" in
@@ -137,22 +152,21 @@ start_proxy() {
 }
 
 start_broker() {
-  local ws="$1"
   running gh-broker && return
   podman secret exists gh-devcontainer \
     || die "no podman secret gh-devcontainer; create it: podman secret create gh-devcontainer <file holding the token>"
   mkdir -p "${GH_DIR}"
   chmod 700 "${RUN}/workbench" "${GH_DIR}"
   podman rm -f gh-broker >/dev/null 2>&1 || true
-  # The folder holding the workspaces, read only and not relabelled: the broker
-  # can read only what a workbench has already labelled for this category,
-  # which is enough for gh to find the repository a command was run from.
+  # WORKBENCH_ROOT, read only and not relabelled: the broker can read only
+  # what a workbench has already labelled for this category, which is enough
+  # for gh to find the repository a command was run from.
   podman run -d --name gh-broker \
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
     --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
     --secret gh-devcontainer,type=env,target=GH_TOKEN \
     -v "${GH_DIR}:/run/gh-broker:Z" \
-    -v "$(dirname "${ws}"):$(dirname "${ws}"):ro" \
+    -v "${ROOT}:${ROOT}:ro" \
     "${BROKER_IMAGE}" >/dev/null
 }
 
@@ -241,14 +255,56 @@ cmd_up() {
   local ws
   ws="$(workspace "${1:-}")"
   profiles "${ws}" >/dev/null
-  mkdir -p "${SSH_DIR}" "${GH_DIR}"
-  start_proxy
-  start_broker "${ws}"
-  start_ssh_agent
+  case "${ws}/" in
+    "${ROOT}"/*) ;;
+    *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
+  esac
+  start_helpers
   start_engine "${ws}"
   start_workbench "${ws}"
   echo "workbench: up for ${ws} ($(wb_name "${ws}"), $(engine_name "${ws}"))"
   echo "workbench: terminal: host/workbench shell; editor: Attach to Running Container, $(wb_name "${ws}")"
+}
+
+start_helpers() {
+  mkdir -p "${SSH_DIR}" "${GH_DIR}"
+  start_proxy
+  start_broker
+  start_ssh_agent
+}
+
+cmd_helpers() {
+  start_helpers
+  echo "workbench: helpers up (egress-proxy, gh-broker, devcontainer-ssh-agent)"
+}
+
+cmd_helpers_down() {
+  podman rm -f -t 5 gh-broker egress-proxy devcontainer-ssh-agent >/dev/null 2>&1 || true
+}
+
+cmd_install_units() {
+  local dir="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+  mkdir -p "${dir}"
+  cat > "${dir}/workbench-helpers.service" <<UNIT
+# Written by ${HERE}/host/workbench install-units.
+[Unit]
+Description=Workbench helpers: egress proxy, gh broker, ssh-agent
+After=default.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=WORKBENCH_ROOT=${ROOT}
+ExecStart=${HERE}/host/workbench helpers
+ExecStop=${HERE}/host/workbench helpers-down
+
+[Install]
+WantedBy=default.target
+UNIT
+  systemctl --user daemon-reload
+  systemctl --user enable workbench-helpers.service
+  echo "workbench: installed ${dir}/workbench-helpers.service; it starts the helpers at your next login"
+  echo "workbench: remove with: systemctl --user disable workbench-helpers.service && rm ${dir}/workbench-helpers.service"
 }
 
 cmd_unlock() {
@@ -298,6 +354,9 @@ case "${1:-}" in
   load-l2) cmd_load_l2 "${2:-}" ;;
   status) cmd_status ;;
   down) cmd_down "${2:-}" ;;
-  -h | --help | help) sed -n '3,44p' "$0" ;;
+  helpers) cmd_helpers ;;
+  helpers-down) cmd_helpers_down ;;
+  install-units) cmd_install_units ;;
+  -h | --help | help) sed -n '3,55p' "$0" ;;
   *) sed -n '3,20p' "$0" >&2; exit 2 ;;
 esac
