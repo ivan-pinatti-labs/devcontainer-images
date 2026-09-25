@@ -8,8 +8,8 @@
 
   Hooks may write the paths the workbench or the host execute (formatters open
   files for writing even when they change nothing), so those are writable for
-  the run. Afterwards they are compared with before, and a run in which a hook
-  actually changed one fails, naming the files, so nothing lands there unseen.
+  the run; l2 compares them with before, as it does after every run, and a run
+  in which a hook actually changed one fails, naming the files.
 
   A repository whose hooks build or start containers of their own lists
   hooks-engine in .devcontainer/workbench-profile, and its runs get the L2
@@ -20,7 +20,7 @@
   the list; SKIP adds to it, as with pre-commit itself.
 
   Exit status codes:
-    1    a hook changed a protected path
+    3    a hook changed a protected path (reported by l2)
     any  otherwise, the exit status of pre-commit
 '
 set -eu
@@ -28,31 +28,13 @@ set -eu
 skip="${L2_SKIP_HOOKS-markdown-link-check,lychee}"
 [ -n "${SKIP:-}" ] && skip="${skip:+${skip},}${SKIP}"
 
-# Every file by content, and every symbolic link by its target, so a hook that
-# adds a link (to anywhere) is caught as surely as one that edits a file.
-protected() {
-  for p in .devcontainer .vscode .claude .codex Makefile host; do
-    [ -e "${p}" ] || [ -L "${p}" ] || continue
-    find "${p}" -type f -exec sha256sum {} + 2>/dev/null
-    find "${p}" -type l -printf 'link %p -> %l\n'
-  done | sort
-}
-
 cd "$(git rev-parse --show-toplevel)"
 engine=""
 if [ -f .devcontainer/workbench-profile ] && grep -qx hooks-engine .devcontainer/workbench-profile; then
   engine="--engine"
 fi
-before="$(protected)"
-status=0
+# The protected path check is l2's own, on every run; here it only has to
+# leave those paths writable, since formatters open files for writing even
+# when they change nothing.
 # shellcheck disable=SC2086 # ${engine} is one flag or nothing
-l2 ${engine} --protected-rw --env "SKIP=${skip}" -- pre-commit "$@" || status=$?
-after="$(protected)"
-if [ "${before}" != "${after}" ]; then
-  echo "" >&2
-  echo "l2-pre-commit: a hook changed files the workbench or the host execute:" >&2
-  printf '%s\n' "${before}" "${after}" | sort | uniq -u | awk '{print "  " $2}' | sort -u >&2
-  echo "l2-pre-commit: review them (git diff) before committing again." >&2
-  exit 1
-fi
-exit "${status}"
+exec l2 ${engine} --protected-rw --env "SKIP=${skip}" -- pre-commit "$@"

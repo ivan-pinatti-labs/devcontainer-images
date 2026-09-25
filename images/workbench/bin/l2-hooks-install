@@ -24,11 +24,22 @@ if hp="$(git config --get core.hooksPath)"; then
   exit 1
 fi
 
+# default_install_hook_types in either YAML form: [a, b] or a block list.
 types="$(python3 - <<'PY'
 import re
 text = open(".pre-commit-config.yaml").read()
-m = re.search(r"^default_install_hook_types:\s*\[([^\]]*)\]", text, re.M)
-print(" ".join(t.strip() for t in m.group(1).split(",")) if m else "pre-commit")
+flow = re.search(r"^default_install_hook_types:\s*\[([^\]]*)\]", text, re.M)
+block = re.search(r"^default_install_hook_types:\s*\n((?:[ \t]+-[ \t]*\S+[^\n]*\n?)+)", text, re.M)
+if flow:
+    found = [t.strip().strip("'\"") for t in flow.group(1).split(",") if t.strip()]
+elif block:
+    found = [
+        re.sub(r"^[ \t]+-[ \t]*", "", line).split("#")[0].strip().strip("'\"")
+        for line in block.group(1).splitlines() if line.strip()
+    ]
+else:
+    found = ["pre-commit"]
+print(" ".join(found))
 PY
 )"
 

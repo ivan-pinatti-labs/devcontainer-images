@@ -1,5 +1,5 @@
 {
-  "comment": "gh commands the broker runs for the workbench. A command is its first two words; `api` is handled separately (GET only, repository paths under an allowed owner). Owners limit -R/--repo and api paths. Widening this file is a reviewed change.",
+  "comment": "gh commands the broker runs for the workbench. A command is its first two words. `api` is read only (GET, no fields) except for the writes named under api: replying to a review comment and the listed GraphQL mutations. Owners limit -R/--repo, URLs and api paths. Widening this file is a reviewed change.",
   "owners": ["ivan-pinatti-labs"],
   "commands": [
     "issue list",
@@ -30,5 +30,12 @@
     "search prs",
     "status"
   ],
-  "api": { "methods": ["GET"], "graphql": "query-only" }
+  "api": {
+    "methods": ["GET"],
+    "graphql": "queries, plus the mutations listed here",
+    "graphql_mutations": ["resolveReviewThread"],
+    "writes": [
+      "a reply to a pull request review comment (POST .../pulls/N/comments/ID/replies, inline body only)"
+    ]
+  }
 }

@@ -123,21 +123,25 @@ COPY claude/managed-settings.json claude/CLAUDE.md /etc/claude-code/
 COPY codex/requirements.toml codex/managed_config.toml /etc/codex/
 
 # The extensions, read only. The editor's server looks for them under
-# ~/.vscode-server/extensions, which is a link to this root owned directory,
-# so neither an extension nor anything else running here can add, update or
-# replace one. Auto update is off in the server's machine settings.
+# ~/.vscode-server/extensions, a root owned link to this root owned
+# directory. ~/.vscode-server itself is root owned and sticky, like /tmp: the
+# server can create what it needs in there (its own download, its data
+# directory), but nothing running as dev can rename or replace the link, so
+# no extension or anything else here can add, update or swap one. Auto update
+# is off in the server's machine settings.
 COPY --from=extensions --chown=0:0 /opt/vscode-extensions /opt/vscode-extensions
 COPY vscode/machine-settings.json /home/dev/.vscode-server/data/Machine/settings.json
 RUN ln -s /opt/vscode-extensions /home/dev/.vscode-server/extensions \
   && install -d -o 1000 -g 1000 /home/dev/.claude /home/dev/.codex /home/dev/.config \
-  && chown -R 1000:1000 /home/dev/.vscode-server \
-  && chown -h 1000:1000 /home/dev/.vscode-server/extensions
+  && chown 0:0 /home/dev/.vscode-server \
+  && chmod 1777 /home/dev/.vscode-server \
+  && chown -R 1000:1000 /home/dev/.vscode-server/data
 
-# Everything under the dev account's home belongs to it, apart from the link
-# to the read only extensions. A root owned leftover from a build step (a
+# Everything under the dev account's home belongs to it, apart from the
+# extensions link and the sticky directory holding it. A root owned leftover from a build step (a
 # cache, a tool's first run) would break that tool for dev at run time.
 RUN set -eu; \
-  left="$(find /home/dev ! -user dev ! -path /home/dev/.vscode-server/extensions)"; \
+  left="$(find /home/dev ! -user dev ! -path /home/dev/.vscode-server ! -path /home/dev/.vscode-server/extensions)"; \
   if [ -n "${left}" ]; then \
     echo "root owned paths under /home/dev:" >&2; \
     echo "${left}" >&2; \

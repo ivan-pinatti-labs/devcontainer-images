@@ -7,9 +7,10 @@ Listens on a unix socket. Each connection carries one JSON line:
 
 The token comes from the GH_TOKEN environment variable, which the host
 passes as a podman secret and which never leaves this container. Refused:
-anything not in /etc/gh-broker/allowlist.json, `api` with a method other than
-GET or with fields, GraphQL mutations, and any repository outside the
-allowed owners.
+anything not in /etc/gh-broker/allowlist.json, any repository outside the
+allowed owners, flags that read a file, and every `gh api` write except
+replying to a review comment and the GraphQL mutations the allowlist names
+(resolving a review thread).
 """
 import json
 import os
@@ -48,17 +49,68 @@ def repos_ok(argv):
     return True
 
 
+REPLY = re.compile(r"^repos/([^/]+)/[^/]+/pulls/\d+/comments/\d+/replies$", re.I)
+MUTATIONS = frozenset(ALLOW["api"].get("graphql_mutations", []))
+
+
+def mutation_fields(query):
+    """The top level fields of a GraphQL mutation, the operations it runs.
+    Aliases (`x: deleteRepository(...)`) are resolved to the real field, and
+    string literals and argument lists are skipped. None when a fragment
+    spread appears, which could hide an operation."""
+    m = re.search(r"\bmutation\b[^{]*\{", query)
+    names, depth, i, in_string = [], 1, m.end(), False
+    token, alias_pending = "", False
+    while i < len(query) and depth > 0:
+        c = query[i]
+        if in_string:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                in_string = False
+        elif c == '"':
+            in_string = True
+        elif c in "{(":
+            if depth == 1 and token:
+                names.append(token)
+            token, alias_pending = "", False
+            depth += 1
+        elif c in "})":
+            if depth == 1 and token:
+                names.append(token)
+            token = ""
+            depth -= 1
+        elif depth == 1:
+            if c.isalnum() or c == "_":
+                token += c
+            elif c == ":":
+                token, alias_pending = "", True
+            elif c == ".":
+                return None
+            elif token and not alias_pending:
+                names.append(token)
+                token = ""
+            elif token and alias_pending:
+                alias_pending = False
+        i += 1
+    return names
+
+
 def api_ok(argv):
     rest = argv[1:]
-    method = "GET"
+    method = None
     path = None
+    fields = []
     i = 0
     while i < len(rest):
         a = rest[i]
-        # Nothing here needs another host or custom headers.
-        if a in ("--hostname", "-H", "--header") or a.startswith(("--hostname=", "--header=", "-H")):
+        # Nothing here needs another host, custom headers or a request body
+        # read from a file.
+        if a in ("--hostname", "-H", "--header", "--input") or a.startswith(
+            ("--hostname=", "--header=", "--input=", "-H")
+        ):
             return False
-        # Combined short forms, -XPOST and -fquery=..., split into flag and value.
+        # Combined short forms, -XPOST and -fbody=..., split into flag and value.
         if len(a) > 2 and a[:2] in ("-X", "-f", "-F") and not a.startswith("--"):
             rest = rest[:i] + [a[:2], a[2:]] + rest[i + 1:]
             a = rest[i]
@@ -68,22 +120,67 @@ def api_ok(argv):
             continue
         if a.startswith("--method="):
             method = a.split("=", 1)[1].upper()
-        elif a in ("-f", "-F", "--field", "--raw-field", "--input") or a.startswith(("--field=", "--raw-field=", "--input=")):
-            if not (path == "graphql" and a in ("-f", "-F", "--raw-field", "--field")):
-                return False
-            # A field value of @file reads the value from a file, which would
-            # hide a GraphQL mutation from the check below.
-            value = rest[i + 1] if i + 1 < len(rest) else ""
-            if "=@" in value or value.startswith("@"):
-                return False
-            i += 1
+        elif a in ("-f", "-F", "--field", "--raw-field"):
+            fields.append(rest[i + 1] if i + 1 < len(rest) else "")
+            i += 2
+            continue
+        elif a.startswith(("--field=", "--raw-field=")):
+            fields.append(a.split("=", 1)[1])
         elif path is None and not a.startswith("-"):
             path = a.lstrip("/")
         i += 1
+    if path is None:
+        return False
+    # A field value of @file reads it from a file here, in the broker.
+    if any("=@" in f or f.startswith("@") for f in fields):
+        return False
     if path == "graphql":
-        query = " ".join(rest)
-        return not re.search(r"\bmutation\b", query)
-    return method in ALLOW["api"]["methods"] and path is not None and path.lower().startswith(tuple("repos/" + o for o in OWNERS))
+        query = " ".join(fields)
+        if not re.search(r"\bmutation\b", query):
+            return True
+        # One mutation, running exactly one allowed operation.
+        if len(re.findall(r"\bmutation\b", query)) != 1:
+            return False
+        ops = mutation_fields(query)
+        return ops is not None and len(ops) == 1 and ops[0] in MUTATIONS
+    reply = REPLY.match(path)
+    if reply:
+        # A reply to a review comment: a POST (gh sends one whenever fields
+        # are given) with an inline body and nothing else.
+        return (
+            (reply.group(1).lower() + "/").startswith(OWNERS)
+            and method in (None, "POST")
+            and fields != []
+            and all(f.startswith("body=") for f in fields)
+        )
+    # Everything else is read only: GET, and no fields, since gh turns any
+    # request with fields into a POST.
+    return (
+        method in (None, "GET")
+        and not fields
+        and path.lower().startswith(tuple("repos/" + o for o in OWNERS))
+    )
+
+
+# Flags that make gh read (or write) a file named by the caller. The file
+# would be read here, in the broker, where /proc/self/environ holds the token
+# and WORKBENCH_ROOT holds every workspace; a body posted from one is a body
+# the caller can read back. Bodies come from stdin instead (`--body-file -`),
+# which the workbench shim forwards.
+FILE_FLAGS = ("--body-file", "-F", "--recover", "--notes-file")
+
+
+def files_ok(argv):
+    for i, a in enumerate(argv):
+        if a in FILE_FLAGS:
+            if i + 1 >= len(argv) or argv[i + 1] != "-":
+                return False
+        elif a.startswith(tuple(f + "=" for f in FILE_FLAGS if f.startswith("--"))):
+            if a.split("=", 1)[1] != "-":
+                return False
+        elif a.startswith("-F") and len(a) > 2 and a[2:] != "-":
+            return False
+    return True
 
 
 def allowed(argv):
@@ -91,7 +188,7 @@ def allowed(argv):
         return False
     if argv[0] == "api":
         return api_ok(argv)
-    return " ".join(argv[:2]) in COMMANDS and repos_ok(argv)
+    return " ".join(argv[:2]) in COMMANDS and repos_ok(argv) and files_ok(argv)
 
 
 def serve(conn):

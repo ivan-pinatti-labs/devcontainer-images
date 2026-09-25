@@ -170,7 +170,9 @@ def main(argv):
             domains += extra
         acl = f"set_{name.replace('-', '_')}"
         (OUT / f"{name}.domains").write_text("\n".join(squid_domains(domains)) + "\n")
-        rules.append(f'acl {acl} dstdomain "{OUT / (name + ".domains")}"')
+        # -n: match the name the client asked for, never a name found by
+        # reverse DNS of an address, so a bare IP cannot pass as its PTR name.
+        rules.append(f'acl {acl} dstdomain -n "{OUT / (name + ".domains")}"')
         if provider and provider.get("enforce_ips") and ips:
             (OUT / f"{name}.ips").write_text("\n".join(ips) + "\n")
             rules.append(f'acl {acl}_ips dst "{OUT / (name + ".ips")}"')

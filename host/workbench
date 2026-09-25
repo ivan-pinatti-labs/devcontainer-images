@@ -103,6 +103,16 @@ ROOT="${WORKBENCH_ROOT:-$(dirname "${MAIN}")}"
 die() { echo "workbench: $*" >&2; exit 1; }
 running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
 
+# Two workspaces with the same folder name would map to the same container
+# names. Each container carries its workspace in a label; refuse to reuse one
+# that belongs to a different path.
+check_owner() {
+  local name="$1" label="$2" ws="$3" owner
+  owner="$(podman inspect -f "{{index .Config.Labels \"${label}\"}}" "${name}" 2>/dev/null)" || return 0
+  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
+    || die "${name} belongs to ${owner}, another folder of the same name; stop it first (host/workbench down ${owner})"
+}
+
 workspace() {
   local w="${1:-}"
   if [ -z "${w}" ]; then
@@ -239,6 +249,7 @@ start_proxy() {
   local ws="$1" name sets
   ensure_net "${ws}"
   name="$(proxy_name "${ws}")"
+  check_owner "${name}" workbench.proxy "${ws}"
   running "${name}" && return
   sets="$(egress_sets "${ws}")"
   podman rm -f "${name}" >/dev/null 2>&1 || true
@@ -306,6 +317,7 @@ start_engine() {
   local ws="$1" name dir extra=() p gitdir=()
   name="$(engine_name "${ws}")"
   dir="$(engine_dir "${ws}")"
+  check_owner "${name}" workbench.engine "${ws}"
   running "${name}" && return
   for p in $(profiles "${ws}"); do
     case "${p}" in
@@ -341,6 +353,7 @@ start_engine() {
 start_workbench() {
   local ws="$1" name gitdir=()
   name="$(wb_name "${ws}")"
+  check_owner "${name}" workbench.workspace "${ws}"
   running "${name}" && return
   mkdir -p "${DATA}/claude" "${DATA}/codex"
   set_proxy_env "${ws}"

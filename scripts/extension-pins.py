@@ -54,7 +54,8 @@ def read_pins():
             continue
         m = PIN.match(line)
         if not m:
-            sys.exit(f"extension-pins: cannot read '{line}' in {PINS}")
+            print(f"extension-pins: cannot read '{line}' in {PINS}", file=sys.stderr)
+            sys.exit(2)
         pins[m["id"].lower()] = m["version"]
     return pins
 
@@ -77,7 +78,8 @@ def releases(ext_id):
     with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
         results = json.load(r)["results"][0]["extensions"]
     if not results:
-        sys.exit(f"extension-pins: {ext_id} is not on the Marketplace")
+        print(f"extension-pins: {ext_id} is not on the Marketplace", file=sys.stderr)
+        sys.exit(2)
     return results[0]["versions"]
 
 
@@ -89,8 +91,14 @@ def is_pre_release(v):
     )
 
 
-def eligible(ext_id, now):
+def eligible(ext_id, pinned, now):
+    """The newest stable release old enough to take, if it is newer than the
+    pin. The Marketplace lists releases newest first, so reaching the pinned
+    version before finding one means nothing newer qualifies, and a pin set by
+    hand to something newer than any eligible release is never moved back."""
     for v in releases(ext_id):
+        if v["version"] == pinned:
+            return None, None
         if v.get("targetPlatform") not in PLATFORMS or is_pre_release(v):
             continue
         released = datetime.datetime.fromisoformat(
@@ -113,8 +121,8 @@ def main(argv):
     due = {}
     try:
         for ext_id, pinned in pins.items():
-            version, released = eligible(ext_id, now)
-            if version and version != pinned:
+            version, released = eligible(ext_id, pinned, now)
+            if version:
                 due[ext_id] = (pinned, version, released)
     except OSError as e:
         print(
