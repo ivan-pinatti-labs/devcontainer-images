@@ -88,9 +88,9 @@ RUN printf '%s\n' \
 # postinstall that is needed. See docs/TOOL_SOURCES.md for why npm, why
 # pinned, and what each package's signature does and does not prove.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.274
+ARG CLAUDE_CODE_VERSION=2.1.276
 # renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.154.0
+ARG CODEX_VERSION=0.155.0
 WORKDIR /opt/agent-clis
 RUN set -eu; \
   npm init --yes >/dev/null; \
@@ -111,7 +111,7 @@ COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh /usr/local/bin/
 COPY bin/route-to-l2 /usr/local/libexec/workbench/route-to-l2
 COPY share/git-hook /usr/local/share/workbench/git-hook
 COPY claude/managed-settings.json claude/CLAUDE.md /etc/claude-code/
-COPY codex/requirements.toml /etc/codex/requirements.toml
+COPY codex/requirements.toml codex/managed_config.toml /etc/codex/
 
 # The extensions, read only. The editor's server looks for them under
 # ~/.vscode-server/extensions, which is a link to this root owned directory,

@@ -1,0 +1,8 @@
+# Managed defaults for Codex in the workbench, read from
+# /etc/codex/managed_config.toml. requirements.toml next to it holds the
+# constraints; this only sets starting values.
+
+# The version is pinned by the workbench image and moves through a reviewed
+# bump at least seven days after a release (docs/TOOL_SOURCES.md), so Codex's
+# own "update available" check has nothing useful to say here.
+check_for_update_on_startup = false
