@@ -110,7 +110,7 @@ RUN set -eu; \
 COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh /usr/local/bin/
 COPY bin/route-to-l2 /usr/local/libexec/workbench/route-to-l2
 COPY share/git-hook /usr/local/share/workbench/git-hook
-COPY claude/managed-settings.json /etc/claude-code/managed-settings.json
+COPY claude/managed-settings.json claude/CLAUDE.md /etc/claude-code/
 COPY codex/requirements.toml /etc/codex/requirements.toml
 
 # The extensions, read only. The editor's server looks for them under

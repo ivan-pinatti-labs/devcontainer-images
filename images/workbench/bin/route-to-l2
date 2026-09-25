@@ -93,6 +93,11 @@ def main():
         wrapped = f"{l2} bash -c {shlex.quote(command)}"
     reason = ("Runs project code, so it goes to L2 (no credentials, "
               + ("network through the egress proxy only)." if net else "no network)."))
+    context = ("This command ran in L2, not in the workbench and not on the host: a "
+                "throwaway container from the repository's L2 image, with no credentials, "
+                + ("network through the egress proxy only, " if net else "no network, ")
+                + "and only the working tree mounted. A tool that is not found there is "
+                "missing from the repository's L2 image (.devcontainer/l2/Dockerfile).")
     if deny_mode:
         out = {"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -103,6 +108,7 @@ def main():
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
             "permissionDecisionReason": reason,
+            "additionalContext": context,
             "updatedInput": dict(call["tool_input"], command=wrapped)}}
     json.dump(out, sys.stdout)
     return 0
