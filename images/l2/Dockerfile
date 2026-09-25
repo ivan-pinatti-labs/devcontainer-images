@@ -68,7 +68,8 @@ COPY bin/docker bin/l2-prepare-hooks bin/actionlint /usr/local/bin/
 # environments, on a volume the wrapper mounts per repository.
 USER 1000:1000
 WORKDIR /workspace
-ENV HOME=/root
+ENV HOME=/root \
+    CHECKPOINT_DISABLE=1
 
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
       org.opencontainers.image.description="L2 of the ivan-pinatti-labs images: pre-commit, language runtimes and baked linters, run with no network and no credentials." \

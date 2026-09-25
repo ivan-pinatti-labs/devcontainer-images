@@ -28,3 +28,8 @@
 ^auth\.docker\.io$
 ^production\.cloudflare\.docker\.com$
 ^production\.cloudfront\.docker\.com$
+^registry\.terraform\.io$
+^releases\.hashicorp\.com$
+^registry\.opentofu\.org$
+^get\.opentofu\.org$
+^packages\.opentofu\.org$
