@@ -34,7 +34,7 @@
   // has something else for Renovate to watch; see README.md's "Using this
   // template" step 5.
   // customManagers:dockerfileVersions reads the `# renovate:` annotations
-  // above the two ARG lines in images/base/Dockerfile that pin the coding
+  // above the two ARG lines in images/workbench/Dockerfile that pin the coding
   // agent CLI versions. Neither the dockerfile manager (which only sees FROM
   // lines) nor any npm manager (there is no package.json here; the install
   // happens inside a RUN) extracts an annotated ARG, so without this preset
@@ -97,6 +97,22 @@
   // together. The apt packages a repository installs on top of this image
   // carry no version pin for Renovate to move; the two npm agent CLIs do,
   // and custom.regex is what moves them.
+  // The images scripts/build-images.sh runs (a throwaway registry, trivy,
+  // skopeo) are pinned by tag and digest in shell assignments, each under a
+  // `# renovate:` annotation the dockerfileVersions preset does not look at,
+  // since it only reads Dockerfiles. Pin Only has no grammar for a shell
+  // assignment either (.github/pin-only.yml), so these bumps wait for a
+  // person, which is the point: they change what scans the images.
+  customManagers: [
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^scripts/build-images\\.sh$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n[A-Z_]+=[^:\\s]+:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
+      ],
+    },
+  ],
+
   enabledManagers: [
     "github-actions",
     "pre-commit",

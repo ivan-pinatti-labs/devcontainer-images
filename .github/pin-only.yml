@@ -9,13 +9,24 @@
 # Unlike every other repository here the block scalar exemption is not
 # scoped to .github/workflows/: it applies on every path, which is why the
 # three action grammars carry it as default_grammars rather than as a rule.
+
+# Every image's Dockerfile. scripts/build-images.sh carries image pins too,
+# but no grammar here reads a shell assignment, so a bot bump of one of those
+# is left to a person on purpose.
 allowed_paths:
   - .pre-commit-config.yaml
   - .github/workflows/
   - images/base/Dockerfile
+  - images/workbench/Dockerfile
+  - images/l2/Dockerfile
+  - images/l2-engine/Dockerfile
+  - images/gh-broker/Dockerfile
+  - images/egress-proxy/Dockerfile
 
+# The coding agent CLI versions are annotated ARGs in the workbench's
+# Dockerfile.
 arg_sources:
-  - file: images/base/Dockerfile
+  - file: images/workbench/Dockerfile
     annotations:
       - '^#\s*renovate:'
 

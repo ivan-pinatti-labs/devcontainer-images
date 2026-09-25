@@ -35,3 +35,14 @@
 ^packages\.opentofu\.org$
 ^dl-cdn\.alpinelinux\.org$
 ^mirror\.gcr\.io$
+^archive\.ubuntu\.com$
+^security\.ubuntu\.com$
+^deb\.nodesource\.com$
+^cli\.github\.com$
+^apt\.releases\.hashicorp\.com$
+^main\.vscode-cdn\.net$
+^tuf-repo-cdn\.sigstore\.dev$
+^crl3\.digicert\.com$
+^ocsp\.digicert\.com$
+^crl\.microsoft\.com$
+^www\.microsoft\.com$
