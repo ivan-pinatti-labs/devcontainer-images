@@ -1,0 +1,10 @@
+#!/bin/sh
+: '
+  What the workbench container runs as its main process. Puts the policies
+  that live in the agents own writable folders back to the image copy, then
+  waits; the terminal and the editor attach to the running container.
+'
+set -eu
+mkdir -p "${CODEX_HOME}/rules"
+cp /usr/local/share/workbench/codex-workbench.rules "${CODEX_HOME}/rules/workbench.rules"
+exec sleep infinity

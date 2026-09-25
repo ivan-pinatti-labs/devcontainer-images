@@ -110,9 +110,10 @@ RUN set -eu; \
 
 # The workbench's own tools, and the policies neither agent can edit: root
 # owned and read only to the dev account.
-COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh /usr/local/bin/
+COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh bin/workbench-init /usr/local/bin/
 COPY bin/route-to-l2 /usr/local/libexec/workbench/route-to-l2
 COPY share/git-hook /usr/local/share/workbench/git-hook
+COPY codex/workbench.rules /usr/local/share/workbench/codex-workbench.rules
 COPY claude/managed-settings.json claude/CLAUDE.md /etc/claude-code/
 COPY codex/requirements.toml codex/managed_config.toml /etc/codex/
 
@@ -123,7 +124,7 @@ COPY codex/requirements.toml codex/managed_config.toml /etc/codex/
 COPY --from=extensions --chown=0:0 /opt/vscode-extensions /opt/vscode-extensions
 COPY vscode/machine-settings.json /home/dev/.vscode-server/data/Machine/settings.json
 RUN ln -s /opt/vscode-extensions /home/dev/.vscode-server/extensions \
-  && install -d -o 1000 -g 1000 /home/dev/.claude /home/dev/.codex \
+  && install -d -o 1000 -g 1000 /home/dev/.claude /home/dev/.codex /home/dev/.config \
   && chown -R 1000:1000 /home/dev/.vscode-server \
   && chown -h 1000:1000 /home/dev/.vscode-server/extensions
 

@@ -1,0 +1,10 @@
+# Codex command rules for the workbench, copied into ~/.codex/rules/ each
+# time the workbench starts (bin/workbench-init), so an edit made inside the
+# workbench does not survive a restart.
+#
+# `l2` and `l2-pre-commit` talk to the L2 engine over a unix socket, which
+# Codex's own sandbox refuses (measured 2026-09-25: "Operation not
+# permitted"), so they run outside it without asking. What they start is L2:
+# no network unless asked for, no credentials, only the working tree.
+prefix_rule(pattern=["l2"], decision="allow", justification="l2 starts a throwaway L2 container through the engine socket, which the Codex sandbox cannot reach")
+prefix_rule(pattern=["l2-pre-commit"], decision="allow", justification="pre-commit in L2, through the engine socket")

@@ -248,7 +248,7 @@ start_workbench() {
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
     -w "${ws}" \
-    --entrypoint catatonit "${WB_IMAGE}" -- sleep infinity >/dev/null
+    --entrypoint catatonit "${WB_IMAGE}" -- workbench-init >/dev/null
 }
 
 cmd_up() {
