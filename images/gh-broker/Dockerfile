@@ -22,8 +22,11 @@ COPY allowlist.json /etc/gh-broker/allowlist.json
 COPY test_broker.py /tmp/test_broker.py
 RUN python3 /tmp/test_broker.py && rm /tmp/test_broker.py
 USER 1000:1000
+# The root filesystem is read only when the broker runs; gh keeps what it
+# caches (run logs, for one) in the /tmp it is given instead.
 ENV GH_PROMPT_DISABLED=1 \
     GH_NO_UPDATE_NOTIFIER=1 \
+    XDG_CACHE_HOME=/tmp \
     GH_BROKER_SOCK=/run/gh-broker/gh.sock
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
       org.opencontainers.image.description="Holds the GitHub token and runs allowlisted gh commands for the ivan-pinatti-labs workbench." \
