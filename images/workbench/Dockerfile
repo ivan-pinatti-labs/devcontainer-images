@@ -103,10 +103,10 @@ RUN set -eu; \
   ln -s /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude; \
   ln -s /opt/agent-clis/node_modules/.bin/codex /usr/local/bin/codex; \
   rm -rf /tmp/npm-cache; \
-  mkdir -p /tmp/version-check/.codex; \
-  HOME=/tmp/version-check CODEX_HOME=/tmp/version-check/.codex claude --version; \
-  HOME=/tmp/version-check CODEX_HOME=/tmp/version-check/.codex codex --version; \
-  rm -rf /tmp/version-check
+  mkdir -p /root/version-check/.codex; \
+  HOME=/root/version-check CODEX_HOME=/root/version-check/.codex claude --version; \
+  HOME=/root/version-check CODEX_HOME=/root/version-check/.codex codex --version; \
+  rm -rf /root/version-check
 
 # The workbench's own tools, and the policies neither agent can edit: root
 # owned and read only to the dev account.
