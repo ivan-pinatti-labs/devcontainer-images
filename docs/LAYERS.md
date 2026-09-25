@@ -76,6 +76,13 @@ For the editor, attach VS Code to the running `workbench-<folder>` container
 (**Dev Containers: Attach to Running Container**). The terminal and the editor
 are two views of the same container.
 
+Copy and paste in the terminal work through the terminal itself: Ctrl+Shift+V
+pastes in, and in a full screen program such as Claude Code, hold Shift while
+dragging to select, then Ctrl+Shift+C. The workbench has no access to the
+host's clipboard on purpose, since anything running in it could then read
+whatever was last copied on the host; Claude Code's `/copy` therefore works
+only in a terminal that honours the OSC 52 escape sequence.
+
 The first time in a repository, inside the workbench:
 
 ```shell
