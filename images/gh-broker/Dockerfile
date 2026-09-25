@@ -18,6 +18,9 @@ RUN printf '%s\n' \
   && rm -rf /var/lib/apt/lists/*
 COPY broker.py /usr/local/libexec/gh-broker/broker.py
 COPY allowlist.json /etc/gh-broker/allowlist.json
+# The allow and refuse cases: a change that reopens one fails the build.
+COPY test_broker.py /tmp/test_broker.py
+RUN python3 /tmp/test_broker.py && rm /tmp/test_broker.py
 USER 1000:1000
 ENV GH_PROMPT_DISABLED=1 \
     GH_NO_UPDATE_NOTIFIER=1 \

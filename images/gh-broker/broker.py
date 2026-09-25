@@ -26,7 +26,17 @@ SOCK = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
 REPO_FLAGS = ("-R", "--repo")
 
 
+URL = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/", re.I)
+
+
 def repos_ok(argv):
+    # gh takes full URLs for pull requests, issues and repositories too
+    # (`gh pr comment https://github.com/<owner>/<repo>/pull/1`), which name
+    # a repository without -R.
+    for a in argv:
+        for owner in URL.findall(a):
+            if not (owner.lower() + "/").startswith(OWNERS):
+                return False
     for i, a in enumerate(argv):
         value = None
         if a in REPO_FLAGS and i + 1 < len(argv):
@@ -45,6 +55,13 @@ def api_ok(argv):
     i = 0
     while i < len(rest):
         a = rest[i]
+        # Nothing here needs another host or custom headers.
+        if a in ("--hostname", "-H", "--header") or a.startswith(("--hostname=", "--header=", "-H")):
+            return False
+        # Combined short forms, -XPOST and -fquery=..., split into flag and value.
+        if len(a) > 2 and a[:2] in ("-X", "-f", "-F") and not a.startswith("--"):
+            rest = rest[:i] + [a[:2], a[2:]] + rest[i + 1:]
+            a = rest[i]
         if a in ("-X", "--method"):
             method = rest[i + 1].upper() if i + 1 < len(rest) else ""
             i += 2
@@ -54,6 +71,12 @@ def api_ok(argv):
         elif a in ("-f", "-F", "--field", "--raw-field", "--input") or a.startswith(("--field=", "--raw-field=", "--input=")):
             if not (path == "graphql" and a in ("-f", "-F", "--raw-field", "--field")):
                 return False
+            # A field value of @file reads the value from a file, which would
+            # hide a GraphQL mutation from the check below.
+            value = rest[i + 1] if i + 1 < len(rest) else ""
+            if "=@" in value or value.startswith("@"):
+                return False
+            i += 1
         elif path is None and not a.startswith("-"):
             path = a.lstrip("/")
         i += 1
