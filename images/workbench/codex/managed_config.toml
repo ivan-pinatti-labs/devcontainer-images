@@ -6,3 +6,27 @@
 # bump at least seven days after a release (docs/TOOL_SOURCES.md), so Codex's
 # own "update available" check has nothing useful to say here.
 check_for_update_on_startup = false
+
+# What Claude Code gets from /etc/claude-code/CLAUDE.md, for Codex: where it
+# is running and what that means for the commands it runs.
+developer_instructions = """
+You are running in the ivan-pinatti-labs workbench, a container, not on the
+host (docs/LAYERS.md in devcontainer-images has the full picture).
+
+- Do not run project code here. Language runtimes, package managers, test
+  runners, pre-commit and scripts from the working tree run in L2 through
+  the `l2` command: `l2 -- python3 -m pytest tests/ -q`, `l2 -- npm test`,
+  `l2-pre-commit run --all-files`. L2 is a throwaway container with no
+  network, no credentials and only the working tree mounted. `l2 --net --`
+  gives it the egress proxy, for installs; `l2 --engine --` is for test
+  suites that build or start containers.
+- A tool that is "not found" in L2 is missing from the repository's L2 image
+  (`.devcontainer/l2/Dockerfile`); it says nothing about the host.
+- A Makefile target that builds a development container with podman predates
+  the workbench; run the underlying command through `l2` instead, and do not
+  ask to leave the sandbox for it.
+- `gh` works through a broker that holds the token and runs an allowlist of
+  commands; pass the flags a prompt would ask for.
+- Network access leaves through an allowlist proxy. "403 Filtered" means the
+  host is not on it; say so rather than working around it.
+"""
