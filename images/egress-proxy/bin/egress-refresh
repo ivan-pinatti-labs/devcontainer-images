@@ -24,8 +24,8 @@ Usage:
   egress-refresh [--list]
 
 Environment:
-  EGRESS_SETS   comma separated set names; "workbench" and "github" are
-                always included
+  EGRESS_SETS   comma separated set names; "workbench", "github" and
+                "ghcr" are always included
   EGRESS_OUT    where squid's generated rules go (default /run/egress)
   EGRESS_CACHE  where provider data is kept between runs (default
                 /var/lib/egress)
@@ -46,7 +46,7 @@ import urllib.request
 SETS_DIR = pathlib.Path("/etc/egress/sets")
 OUT = pathlib.Path(os.environ.get("EGRESS_OUT", "/run/egress"))
 CACHE = pathlib.Path(os.environ.get("EGRESS_CACHE", "/var/lib/egress"))
-ALWAYS = ["workbench", "github"]
+ALWAYS = ["workbench", "github", "ghcr"]
 
 
 def log(msg):

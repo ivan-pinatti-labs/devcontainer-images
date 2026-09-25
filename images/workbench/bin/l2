@@ -22,8 +22,10 @@
               when they change nothing)
     --env     pass one environment variable in (repeatable); nothing else
               from the workbench environment is passed
-    --image   the L2 image to use. Default: the first line of
-              .devcontainer/l2-image in the repository, else $L2_IMAGE
+    --image   the L2 image to use. Default: the L2 image of the repository
+              when it has a .devcontainer/l2/Dockerfile (built in the engine
+              the first time, and again whenever that file changes), else
+              the first line of .devcontainer/l2-image, else $L2_IMAGE
 
   What the container gets:
     - the working tree at its own path, read write unless --ro
@@ -95,7 +97,24 @@ if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
     done
   fi
   key="$(basename "$(dirname "${common}")")"
-  [ -n "${image}" ] || { [ -f "${top}/.devcontainer/l2-image" ] && image="$(head -n1 "${top}/.devcontainer/l2-image")"; }
+  if [ -z "${image}" ] && [ -f "${top}/.devcontainer/l2-image" ]; then
+    image="$(head -n1 "${top}/.devcontainer/l2-image")"
+  fi
+  if [ -z "${image}" ] && [ -f "${top}/.devcontainer/l2/Dockerfile" ]; then
+    image="localhost/devcontainer-l2-${key//[^A-Za-z0-9_.-]/_}:local"
+  fi
+  # The repository's own L2 image, built in the engine (behind the egress
+  # proxy) when it is missing or its Dockerfile has changed since.
+  dockerfile="${top}/.devcontainer/l2/Dockerfile"
+  if [ -n "${image}" ] && [ -f "${dockerfile}" ] && [ "${image}" = "localhost/devcontainer-l2-${key//[^A-Za-z0-9_.-]/_}:local" ]; then
+    want="$(sha256sum "${dockerfile}" | cut -d' ' -f1)"
+    have="$(podman image inspect --format '{{index .Labels "workbench.l2.dockerfile"}}' "${image}" 2>/dev/null || true)"
+    if [ "${want}" != "${have}" ]; then
+      echo "l2: building ${image} from .devcontainer/l2/Dockerfile, in the engine" >&2
+      podman build --quiet --label "workbench.l2.dockerfile=${want}" \
+        -f "${dockerfile}" -t "${image}" "${top}" >&2
+    fi
+  fi
 else
   top="${PWD}"
   args+=(-v "${top}:${top}:${mode}")

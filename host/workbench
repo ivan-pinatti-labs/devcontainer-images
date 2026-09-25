@@ -43,8 +43,9 @@
 
   Each workspace has its own egress proxy and internal network. The proxy
   allows the egress sets the checkout lists in .devcontainer/egress-sets, one
-  name per line (default: python, node, golang), plus workbench and github,
-  which are always on. `podman run --rm localhost/devcontainer-egress-proxy
+  name per line (default: python, node, golang), plus workbench, github and
+  ghcr, which are always on, and ubuntu when the checkout has an L2 image of
+  its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/devcontainer-egress-proxy
   egress-refresh --list` shows every set.
 
   State kept on the host:
@@ -73,8 +74,8 @@ ENGINE_IMAGE="localhost/devcontainer-l2-engine:${TAG}"
 BROKER_IMAGE="localhost/devcontainer-gh-broker:${TAG}"
 PROXY_IMAGE="localhost/devcontainer-egress-proxy:${TAG}"
 
-# Egress sets every workspace gets when it names none of its own; workbench
-# and github are always added by the proxy itself.
+# Egress sets every workspace gets when it names none of its own; workbench,
+# github and ghcr are always added by the proxy itself.
 DEFAULT_SETS=python,node,golang
 # Every container that talks over a socket to another runs in the same SELinux
 # domain and category, or the connection is refused.
@@ -155,16 +156,23 @@ set_proxy_env() {
 # name per line, comma separated for the proxy. The proxy refuses a name it
 # does not know; this only refuses one that could not be a name at all.
 egress_sets() {
-  local f p out=""
-  f="$(profile_source "$1")/.devcontainer/egress-sets"
-  [ -f "${f}" ] || { echo "${DEFAULT_SETS}"; return; }
-  while read -r p; do
-    case "${p}" in
-      '' | '#'*) ;;
-      *[!a-z0-9-]*) die "'${p}' in ${f} is not an egress set name" ;;
-      *) out="${out:+${out},}${p}" ;;
-    esac
-  done < "${f}"
+  local src f p out=""
+  src="$(profile_source "$1")"
+  f="${src}/.devcontainer/egress-sets"
+  if [ -f "${f}" ]; then
+    while read -r p; do
+      case "${p}" in
+        '' | '#'*) ;;
+        *[!a-z0-9-]*) die "'${p}' in ${f} is not an egress set name" ;;
+        *) out="${out:+${out},}${p}" ;;
+      esac
+    done < "${f}"
+  else
+    out="${DEFAULT_SETS}"
+  fi
+  # A repository with an L2 image of its own gets it built in the engine by
+  # `l2`, and that build installs from Ubuntu's archive.
+  [ -f "${src}/.devcontainer/l2/Dockerfile" ] && out="${out:+${out},}ubuntu"
   echo "${out}"
 }
 

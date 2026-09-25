@@ -98,8 +98,9 @@ or `~/.codex`.
 ### Per repository
 
 A repository adds what its hooks and tests need on top of the shared L2
-image in `.devcontainer/l2/Dockerfile`, and names the result in
-`.devcontainer/l2-image`. It opts in to more for its engine in
+image in `.devcontainer/l2/Dockerfile`. `l2` builds that image in the engine
+(behind the egress proxy) the first time it is needed, and again whenever the
+file changes, so there is no build step to remember. It opts in to more for its engine in
 `.devcontainer/workbench-profile`, one name per line, from a fixed list
 (`host/workbench --help`): `nested-network` for tests whose containers talk
 to each other, `hooks-engine` for hooks that build or start containers,
@@ -242,7 +243,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | --- | --- | --- |
 | `workbench` (always) | the agents' APIs, VS Code server and extension downloads, their certificate checks | |
 | `github` (always) | github.com, the API, codeload, ssh over 443, release and raw downloads | GitHub's ranges from `api.github.com/meta`, enforced |
-| `ghcr` | GitHub's container registry | GitHub's ranges, enforced |
+| `ghcr` (always) | GitHub's container registry, where these images are published | GitHub's ranges, enforced |
 | `python`, `node`, `golang` | PyPI, npm, the Go module proxy | |
 | `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
 | `docker-hub`, `quay` | those registries and their CDNs | |
@@ -253,8 +254,10 @@ What a proxy allows is built from **egress sets**, one per service, in
 `podman run --rm localhost/devcontainer-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it
 needs in `.devcontainer/egress-sets`, one per line (with no file: `python`,
-`node`, `golang`); `workbench` and `github` are always added. An unknown name
-stops the proxy from starting, and the error lists the known ones.
+`node`, `golang`); `workbench`, `github` and `ghcr` are always added, and
+`ubuntu` too when the repository has an L2 image of its own to build. An
+unknown name stops the proxy from starting, and the error lists the known
+ones.
 
 A set is a small TOML file: a description, its domains (`example.com` for
 that name alone, `*.example.com` for it and every name under it), and
