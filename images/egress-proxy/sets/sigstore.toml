@@ -1,2 +1,2 @@
-description = "Sigstore's trust root, which `npm audit signatures` and cosign read to verify a signature."
-domains = ["tuf-repo-cdn.sigstore.dev"]
+description = "Sigstore's trust root, which `npm audit signatures` and cosign read to verify a signature, and its transparency log, where cosign looks up a keyless signature's entry (verifying tflint's release checksums, for one)."
+domains = ["tuf-repo-cdn.sigstore.dev", "rekor.sigstore.dev"]

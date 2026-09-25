@@ -76,8 +76,7 @@ key's public half is added to your GitHub account as an authentication key.
 Each day, from the repository you are working on:
 
 ```shell
-host/workbench up        # proxy, broker, ssh-agent, L2 engine, workbench
-host/workbench load-l2   # the first time: L2 images into the engine
+host/workbench up        # proxy, broker, ssh-agent, L2 engine (with the current L2 image), workbench
 host/workbench unlock    # type the key's passphrase; lasts 8 hours
 host/workbench shell     # a terminal in the workbench
 ```
@@ -260,7 +259,8 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `workbench` (always) | the agents' APIs, VS Code server and extension downloads, their certificate checks | |
 | `github` (always) | github.com, the API, codeload, ssh over 443, release and raw downloads | GitHub's ranges from `api.github.com/meta`, enforced |
 | `ghcr` (always) | GitHub's container registry, where these images are published | GitHub's ranges, enforced |
-| `python`, `node`, `golang` | PyPI, npm, the Go module proxy | |
+| `python`, `node` | PyPI, npm | |
+| `golang` | the Go module proxy, and every Cloud Storage bucket (below) | |
 | `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
 | `docker-hub`, `quay` | those registries and their CDNs | |
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
@@ -269,8 +269,8 @@ What a proxy allows is built from **egress sets**, one per service, in
 
 `podman run --rm localhost/devcontainer-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it
-needs in `.devcontainer/egress-sets`, one per line (with no file: `python`,
-`node`, `golang`); `workbench`, `github` and `ghcr` are always added, and
+needs in `.devcontainer/egress-sets`, one per line (with no file: `python`
+and `node`); `workbench`, `github` and `ghcr` are always added, and
 `ubuntu` and `nodesource` too when the repository has an L2 image of its own
 to build. An
 unknown name stops the proxy from starting, and the error lists the known
@@ -317,8 +317,18 @@ downloads off to `storage.googleapis.com`, so that set opens every Cloud
 Storage bucket there, not only the proxy's. Fetching modules from their own
 repositories instead was tried and fails verification for some of them
 (measured 2026-09-25: gitleaks v8.30.1 against the checksum database), so
-there is no narrower way in. Select `golang` only where golang hooks or
-builds need it.
+there is no narrower way in.
+
+So golang hooks do not use it. pre-commit builds them from source, which
+means they need Go modules rather than a binary, and the L2 image carries
+exactly those modules as a read only module proxy
+(`images/l2/go-modules.txt`), fetched and verified against Go's checksum
+database in a throwaway stage of the image build. L2 runs with `GOPROXY`
+pointing there and nowhere else, and checks the checksum database entries it
+carries, all offline. A hook pinned to a version missing from the list fails
+with "module lookup disabled by GOPROXY=off": bump the list first, then the
+pin. Select `golang` only to build Go against the network, as building the
+L2 image itself does.
 
 ## Extensions
 

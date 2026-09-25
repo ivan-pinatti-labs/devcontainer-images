@@ -110,15 +110,20 @@ if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
     image="localhost/devcontainer-l2-${key//[^A-Za-z0-9_.-]/_}:local"
   fi
   # The repository's own L2 image, built in the engine (behind the egress
-  # proxy) when it is missing or its Dockerfile has changed since.
+  # proxy) when it is missing, or when its Dockerfile or the shared L2 image
+  # it builds on has changed since.
   dockerfile="${top}/.devcontainer/l2/Dockerfile"
   if [ -n "${image}" ] && [ -f "${dockerfile}" ] && [ "${image}" = "localhost/devcontainer-l2-${key//[^A-Za-z0-9_.-]/_}:local" ]; then
-    want="$(sha256sum "${dockerfile}" | cut -d' ' -f1)"
+    base_id="$(podman image inspect --format '{{.Id}}' "${L2_IMAGE:-}" 2>/dev/null || true)"
+    want="$({ cat "${dockerfile}"; echo "${base_id}"; } | sha256sum | cut -d' ' -f1)"
     have="$(podman image inspect --format '{{index .Labels "workbench.l2.dockerfile"}}' "${image}" 2>/dev/null || true)"
     if [ "${want}" != "${have}" ]; then
       echo "l2: building ${image} from .devcontainer/l2/Dockerfile, in the engine" >&2
-      podman build --quiet --label "workbench.l2.dockerfile=${want}" \
-        -f "${dockerfile}" -t "${image}" "${top}" >&2
+      if ! podman build --quiet --label "workbench.l2.dockerfile=${want}" \
+        -f "${dockerfile}" -t "${image}" "${top}" >&2; then
+        [ -n "${base_id}" ] || echo "l2: ${L2_IMAGE:-the L2 image} is not in the engine; on the host, host/workbench load-l2 copies it in" >&2
+        exit 1
+      fi
     fi
   fi
 else

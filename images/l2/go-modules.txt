@@ -1,0 +1,21 @@
+# The Go modules L2 serves to pre-commit's golang hooks, offline.
+#
+# pre-commit builds a golang hook from source (`go install ./...` in the hook
+# repository, then `go install` for each additional dependency), so the hook
+# needs its modules, not a binary. The image build fetches exactly these,
+# verified against Go's checksum database, into a read only module proxy, and
+# L2 runs with GOPROXY pointing at it and nothing else. No workspace needs the
+# Go module proxy, or the storage.googleapis.com it hands downloads off to.
+#
+# A hook pinned to a version missing here fails in L2 with "module lookup
+# disabled by GOPROXY=off". Bump the line here first, then the hook's pin.
+#
+# One per line:
+#   <hook repository URL> <rev>   a golang hook repository, at its pinned rev
+#   <module>@<version>            an additional_dependencies entry
+
+# checkmake, through pre-commit-checklists' checklist-dev-make
+https://github.com/checkmake/checkmake v0.3.2
+# gitleaks, docker-torrent-box-with-vpn's staged and full history scans
+https://github.com/gitleaks/gitleaks v8.30.1
+github.com/zricethezav/gitleaks/v8@v8.30.1

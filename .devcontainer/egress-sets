@@ -2,6 +2,7 @@
 # `podman run --rm localhost/devcontainer-egress-proxy:local egress-refresh --list`
 python
 node
+# Building the L2 image in the engine fetches the Go modules it bakes in.
 golang
 ubuntu
 nodesource

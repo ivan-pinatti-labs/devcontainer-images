@@ -20,6 +20,46 @@ FROM ghcr.io/hadolint/hadolint:v2.15.1-debian@sha256:aacf4eda44e40057051f5c5b025
 FROM docker.io/rhysd/actionlint:1.7.12@sha256:9d36088643581e728c969f35141f88139fec77280b2be23c1f66f8e40e1025e7 AS actionlint
 FROM docker.io/dotenvlinter/dotenv-linter:4.0.0@sha256:815fbc7bdd429f5182c349c5772d1d4e0e9135cfb6bb324f1d52258b105ea09d AS dotenv-linter
 
+# The Go modules golang hooks build from (go-modules.txt says which, and
+# why), fetched here in a throwaway stage with the network, by doing exactly
+# what pre-commit does. Go verifies each one against its checksum database
+# as it downloads. What is kept is the module cache's download tree, which is
+# a module proxy as it stands, plus the checksum database entries Go read,
+# so L2 verifies against them offline too.
+# hadolint ignore=DL3006
+FROM ${BASE_IMAGE} AS go-modules
+# A build stage only; nothing from it runs in L2, and only the module tree is
+# copied out.
+# hadolint ignore=DL3002
+USER 0:0
+# hadolint ignore=DL3008
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends golang-go \
+  && rm -rf /var/lib/apt/lists/*
+COPY go-modules.txt /tmp/go-modules.txt
+# Every module is pinned to a version, in go-modules.txt (DL3062 cannot see
+# through the variable).
+# hadolint ignore=DL3062
+RUN set -eu; \
+  export GOPATH=/tmp/gopath GOFLAGS=-modcacherw GOTOOLCHAIN=local; \
+  grep -vE '^[[:space:]]*(#|$)' /tmp/go-modules.txt > /tmp/list; \
+  while read -r what rev; do \
+    if [ -n "${rev}" ]; then \
+      src="$(mktemp -d)"; \
+      git clone --quiet --depth 1 --branch "${rev}" "${what}" "${src}"; \
+      go -C "${src}" install ./...; \
+    else \
+      go install "${what}"; \
+    fi; \
+  done < /tmp/list; \
+  out=/usr/local/share/go-modules; \
+  mkdir -p "${out}/sumdb/sum.golang.org"; \
+  cp -r "${GOPATH}/pkg/mod/cache/download/." "${out}/"; \
+  cp "${GOPATH}/pkg/sumdb/sum.golang.org/latest" "${out}/sumdb/sum.golang.org/latest"; \
+  : > "${out}/sumdb/sum.golang.org/supported"; \
+  find "${out}" -type f \( -name '*.lock' -o -name '*.ziphash' -o -name '*.partial' \) -delete; \
+  chmod -R a-w,a+rX "${out}"
+
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 
@@ -31,8 +71,9 @@ USER 0:0
 #   python3-venv     pre-commit builds a virtual environment per python hook
 #   nodejs           node hooks (cspell, markdownlint) use it instead of
 #                    downloading a runtime of their own through nodeenv
-#   golang-go        golang hooks (checkmake) likewise, instead of pre-commit
-#                    fetching a Go toolchain
+#   golang-go        golang hooks (checkmake, gitleaks) likewise, instead of
+#                    pre-commit fetching a Go toolchain; their modules come
+#                    from the go-modules stage above
 #   shellcheck       actionlint runs it over `run:` blocks
 #   make             most repositories drive their tests through it
 #   podman-remote    a client, for `l2 --engine` runs whose tests build and
@@ -56,6 +97,7 @@ RUN printf '%s\n' \
 COPY --from=hadolint /bin/hadolint /usr/local/bin/hadolint
 COPY --from=actionlint /usr/local/bin/actionlint /usr/local/lib/l2/actionlint
 COPY --from=dotenv-linter /dotenv-linter /usr/local/bin/dotenv-linter
+COPY --from=go-modules /usr/local/share/go-modules /usr/local/share/go-modules
 
 # Which image version each baked binary stands in for. bin/docker refuses a
 # hook asking for a different version, so a hook bump that this image has not
@@ -73,10 +115,14 @@ COPY engine-bin/ /usr/local/lib/l2/engine-bin/
 USER 1000:1000
 WORKDIR /workspace
 # GOTOOLCHAIN=local: go uses the toolchain installed here and never downloads
-# one of its own.
+# one of its own. GOPROXY: modules come from the baked proxy and nowhere
+# else, even on a run with the network; `off` makes a missing one fail by
+# name. A repository whose own L2 layer builds Go against the network sets
+# its own GOPROXY there, and selects the golang egress set.
 ENV HOME=/root \
     CHECKPOINT_DISABLE=1 \
-    GOTOOLCHAIN=local
+    GOTOOLCHAIN=local \
+    GOPROXY=file:///usr/local/share/go-modules,off
 
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
       org.opencontainers.image.description="L2 of the ivan-pinatti-labs images: pre-commit, language runtimes and baked linters, run with no network and no credentials." \

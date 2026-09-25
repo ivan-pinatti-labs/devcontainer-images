@@ -72,8 +72,12 @@
     "getcwd",
     "gitdir",
     "gocryptfs",
+    "GOFLAGS",
     "golang",
     "gomod",
+    "GOPATH",
+    "gopath",
+    "GOPROXY",
     "GOTOOLCHAIN",
     "gpgv",
     "graphql",
@@ -100,6 +104,8 @@
     "markdownlint",
     "mathieudutour",
     "mkdir",
+    "mktemp",
+    "modcacherw",
     "mounton",
     "mountopt",
     "mypy",
@@ -143,6 +149,7 @@
     "Qubes",
     "readline",
     "regid",
+    "rekor",
     "renovate",
     "returncode",
     "reuid",
@@ -181,6 +188,7 @@
     "subkeys",
     "subuid",
     "subuids",
+    "sumdb",
     "sysctls",
     "tclass",
     "textclip",
@@ -207,6 +215,8 @@
     "worktree",
     "worktrees",
     "yamllint",
-    "zizmor"
+    "ziphash",
+    "zizmor",
+    "zricethezav"
   ]
 }

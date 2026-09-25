@@ -12,6 +12,7 @@
                                     a shell in the running workbench
     host/workbench load-l2 [WORKSPACE]
                                     copy the local L2 images into the L2 engine
+                                    now (up does it when they differ)
     host/workbench status           what is running
     host/workbench down [WORKSPACE] stop that workspace (its workbench, engine,
                                     proxy and network); the shared helpers
@@ -50,7 +51,7 @@
 
   Each workspace has its own egress proxy and internal network. The proxy
   allows the egress sets the checkout lists in .devcontainer/egress-sets, one
-  name per line (default: python, node, golang), plus workbench, github and
+  name per line (default: python, node), plus workbench, github and
   ghcr, which are always on, and ubuntu and nodesource when the checkout has
   an L2 image of its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/devcontainer-egress-proxy
   egress-refresh --list` shows every set.
@@ -83,7 +84,7 @@ PROXY_IMAGE="localhost/devcontainer-egress-proxy:${TAG}"
 
 # Egress sets every workspace gets when it names none of its own; workbench,
 # github and ghcr are always added by the proxy itself.
-DEFAULT_SETS=python,node,golang
+DEFAULT_SETS=python,node
 # Every container that talks over a socket to another runs in the same SELinux
 # domain and category, or the connection is refused.
 # shellcheck disable=SC2054 # the comma is inside the SELinux level
@@ -388,6 +389,7 @@ cmd_up() {
   start_helpers
   start_proxy "${ws}"
   start_engine "${ws}"
+  sync_l2 "${ws}"
   start_workbench "${ws}"
   echo "workbench: up for ${ws} ($(wb_name "${ws}"), $(engine_name "${ws}"))"
   echo "workbench: terminal: host/workbench shell; editor: Attach to Running Container, $(wb_name "${ws}")"
@@ -462,6 +464,22 @@ cmd_load_l2() {
   running "${name}" || die "no L2 engine running for ${ws}; host/workbench up first"
   for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
     podman save "${image}" | podman exec -i "${name}" podman load
+  done
+}
+
+# Copy the L2 images into the engine when they are missing there or older
+# than the host's, so a rebuilt L2 image reaches every workspace on its next
+# `up` without anyone remembering load-l2.
+sync_l2() {
+  local name image mine theirs
+  name="$(engine_name "$1")"
+  for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
+    mine="$(podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" || continue
+    theirs="$(podman exec "${name}" podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null || true)"
+    if [ "${mine}" != "${theirs}" ]; then
+      echo "workbench: copying ${image} into the L2 engine"
+      podman save "${image}" | podman exec -i "${name}" podman load --quiet >/dev/null
+    fi
   done
 }
 

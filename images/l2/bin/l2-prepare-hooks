@@ -39,7 +39,18 @@ def main():
     db = sqlite3.connect(store)
     for repo in config.get("repos", []):
         ids = [h.get("id", "") for h in repo.get("hooks", [])]
-        if not any(i.startswith("checklist-") for i in ids) or repo.get("repo") in ("local", "meta"):
+        if repo.get("repo") == "local":
+            # pre-commit-checklists itself: its checklist hooks are local,
+            # and run-checklist.sh takes the checklist's name as its first
+            # argument, from the checklists/ next to the script.
+            for h in repo.get("hooks", []):
+                entry, args = h.get("entry", ""), h.get("args") or []
+                if entry.endswith("run-checklist.sh") and args:
+                    nested = os.path.join(os.path.dirname(entry), "..", "checklists", f"{args[0]}.yaml")
+                    if os.path.exists(nested):
+                        run(["install-hooks", "--config", nested])
+            continue
+        if not any(i.startswith("checklist-") for i in ids) or repo.get("repo") == "meta":
             continue
         row = db.execute("SELECT path FROM repos WHERE repo = ? AND ref = ?", (repo["repo"], repo.get("rev"))).fetchone()
         if not row:
