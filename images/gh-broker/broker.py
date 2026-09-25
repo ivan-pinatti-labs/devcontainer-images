@@ -57,8 +57,22 @@ def mutation_fields(query):
     """The top level fields of a GraphQL mutation, the operations it runs.
     Aliases (`x: deleteRepository(...)`) are resolved to the real field, and
     string literals and argument lists are skipped. None when a fragment
-    spread appears, which could hide an operation."""
+    spread appears, which could hide an operation.
+
+    The scan below only has to be right for the plain subset of GraphQL an
+    allowed operation needs, so anything outside it is refused (None) rather
+    than parsed: a `#` comment, which the server skips to the end of the line
+    while a scan would still see its quotes; block strings and escapes; non
+    ASCII; and string literals holding anything but identifier characters."""
+    if not re.fullmatch(r"[\x20-\x7e\t\r\n]*", query):
+        return None
+    if "#" in query or "\\" in query or '"""' in query or query.count('"') % 2:
+        return None
+    if not all(re.fullmatch(r"[A-Za-z0-9_=+/.:-]*", s) for s in re.findall(r'"([^"]*)"', query)):
+        return None
     m = re.search(r"\bmutation\b[^{]*\{", query)
+    if m is None:
+        return None
     names, depth, i, in_string = [], 1, m.end(), False
     token, alias_pending = "", False
     while i < len(query) and depth > 0:

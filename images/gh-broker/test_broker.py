@@ -34,7 +34,23 @@ cases = [
   (False, "api graphql -f query=mutation{...F}"),
   (False, "auth token"), (False, "repo delete ivan-pinatti-labs/x --yes"), (False, "secret list"), (False, "api user"),
 ]
+# Cases whose arguments hold spaces or newlines, given as argv lists.
+Q = "api graphql -f".split()
+argv_cases = [
+  (True,  Q + ["query=mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}", "-f", "id=T_1"]),
+  (True,  Q + ["query=mutation {\n  resolveReviewThread(input: {threadId: \"T_1\"}) {\n    thread { isResolved }\n  }\n}"]),
+  # A comment the server skips hides a quote from the scan, and with it a
+  # second operation (reported on PR 25).
+  (False, Q + ["query=mutation{resolveReviewThread(input:{threadId:\"T\"}){thread{id}} #\"\ndeleteRepository(input:{repositoryId:\"R\"}){clientMutationId}}"]),
+  (False, Q + ["query=mutation{resolveReviewThread(input:{threadId:\"\"\"T\"\"\"}){thread{id}}}"]),
+  (False, Q + ["query=mutation{resolveReviewThread(input:{threadId:\"T\\\"\"}){thread{id}}}"]),
+  (False, Q + ["query=mutation{resolveReviewThread(input:{threadId:\"T x\"}){thread{id}}}"]),
+  (False, Q + ["query=mutation{﻿deleteRepository(input:{repositoryId:\"R\"}){clientMutationId}}"]),
+  (False, Q + ["query=mutation"]),
+]
 bad = [(exp, c) for exp, c in cases if allowed(c.split()) != exp]
+bad += [(exp, " ".join(a)) for exp, a in argv_cases if allowed(a) != exp]
+cases += argv_cases
 for exp, c in bad: print("WRONG", "expected", "allow" if exp else "refuse", ":", c)
 print(f"{len(cases)-len(bad)}/{len(cases)} cases as expected")
 sys.exit(1 if bad else 0)
