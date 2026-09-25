@@ -60,7 +60,7 @@ COPY --from=dotenv-linter /dotenv-linter /usr/local/bin/dotenv-linter
 # Which image version each baked binary stands in for. bin/docker refuses a
 # hook asking for a different version, so a hook bump that this image has not
 # caught up with fails loudly instead of linting with the wrong release.
-ENV L2_BAKED_IMAGES="ghcr.io/hadolint/hadolint=v2.15.1 docker.io/rhysd/actionlint=1.7.12 docker.io/dotenvlinter/dotenv-linter=4.0.0"
+ENV L2_BAKED_IMAGES="ghcr.io/hadolint/hadolint=v2.15.1 docker.io/hadolint/hadolint=v2.15.1 docker.io/rhysd/actionlint=1.7.12 docker.io/dotenvlinter/dotenv-linter=4.0.0"
 
 COPY bin/docker bin/l2-prepare-hooks bin/actionlint /usr/local/bin/
 COPY engine-bin/ /usr/local/lib/l2/engine-bin/
@@ -72,8 +72,11 @@ COPY engine-bin/ /usr/local/lib/l2/engine-bin/
 # environments, on a volume the wrapper mounts per repository.
 USER 1000:1000
 WORKDIR /workspace
+# GOTOOLCHAIN=local: go uses the toolchain installed here and never downloads
+# one of its own.
 ENV HOME=/root \
-    CHECKPOINT_DISABLE=1
+    CHECKPOINT_DISABLE=1 \
+    GOTOOLCHAIN=local
 
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
       org.opencontainers.image.description="L2 of the ivan-pinatti-labs images: pre-commit, language runtimes and baked linters, run with no network and no credentials." \

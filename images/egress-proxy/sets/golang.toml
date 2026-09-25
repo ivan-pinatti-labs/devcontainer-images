@@ -1,2 +1,2 @@
-description = "The Go module proxy and checksum database, for go and for pre-commit's golang hook environments."
-domains = ["proxy.golang.org", "sum.golang.org"]
+description = "Go modules, for go and for pre-commit's golang hook environments: the module proxy, the checksum database, and storage.googleapis.com, where the proxy hands its downloads off to. That last one is broad (every Cloud Storage bucket, not only the proxy's), and there is no narrower way in: fetching modules from their own repositories instead fails verification for some of them (measured 2026-09-25: gitleaks v8.30.1). Select this set only where golang hooks or builds need it."
+domains = ["proxy.golang.org", "sum.golang.org", "storage.googleapis.com"]

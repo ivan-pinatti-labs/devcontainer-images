@@ -255,7 +255,8 @@ What a proxy allows is built from **egress sets**, one per service, in
 --list` prints them with their descriptions. A repository lists the sets it
 needs in `.devcontainer/egress-sets`, one per line (with no file: `python`,
 `node`, `golang`); `workbench`, `github` and `ghcr` are always added, and
-`ubuntu` too when the repository has an L2 image of its own to build. An
+`ubuntu` and `nodesource` too when the repository has an L2 image of its own
+to build. An
 unknown name stops the proxy from starting, and the error lists the known
 ones.
 
@@ -294,6 +295,14 @@ when a tool fails to download something.
 The proxy decides by host name and address without inspecting TLS, so it
 cannot stop data leaving through a host it allows (a gist on github.com, for
 instance). It stops what is not on the list; it does not make the list safe.
+
+The broadest host in any set is in `golang`: Go's module proxy hands its
+downloads off to `storage.googleapis.com`, so that set opens every Cloud
+Storage bucket there, not only the proxy's. Fetching modules from their own
+repositories instead was tried and fails verification for some of them
+(measured 2026-09-25: gitleaks v8.30.1 against the checksum database), so
+there is no narrower way in. Select `golang` only where golang hooks or
+builds need it.
 
 ## Extensions
 

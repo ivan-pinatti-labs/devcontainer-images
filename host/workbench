@@ -23,7 +23,9 @@
 
   WORKSPACE is the folder mounted into the workbench and the L2 engine, at its
   own path. Default: the main clone of the git repository you are in (so its
-  worktrees are included), else the current directory. Workspaces live under
+  worktrees are included), else the current directory. A single worktree
+  works too, for a clone whose other folders hold data that must not be
+  relabelled; its git directory is then mounted as well. Workspaces live under
   WORKBENCH_ROOT (default: the folder holding this clone), which the gh
   broker sees read only, so gh finds the repository a command ran in.
 
@@ -44,8 +46,8 @@
   Each workspace has its own egress proxy and internal network. The proxy
   allows the egress sets the checkout lists in .devcontainer/egress-sets, one
   name per line (default: python, node, golang), plus workbench, github and
-  ghcr, which are always on, and ubuntu when the checkout has an L2 image of
-  its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/devcontainer-egress-proxy
+  ghcr, which are always on, and ubuntu and nodesource when the checkout has
+  an L2 image of its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/devcontainer-egress-proxy
   egress-refresh --list` shows every set.
 
   State kept on the host:
@@ -108,7 +110,17 @@ workspace() {
   (cd "${w}" && pwd)
 }
 
-slug() { basename "$1" | tr -c 'A-Za-z0-9_.\n-' _; }
+# A workspace's name: the folder's own name, or <clone>-<worktree> for a
+# worktree under a clone's .claude/worktrees, so two repositories' worktrees
+# of the same name never share containers.
+slug() {
+  local name
+  case "$1" in
+    */.claude/worktrees/*) name="$(basename "${1%%/.claude/worktrees/*}")-$(basename "$1")" ;;
+    *) name="$(basename "$1")" ;;
+  esac
+  printf '%s\n' "${name}" | tr -c 'A-Za-z0-9_.\n-' _
+}
 wb_name() { echo "workbench-$(slug "$1")"; }
 engine_name() { echo "l2-engine-$(slug "$1")"; }
 engine_dir() { echo "${RUN}/workbench/$(slug "$1")"; }
@@ -132,6 +144,18 @@ ensure_net() {
     esac
   done
   die "no free 10.203.N.0/24 subnet left for ${net}"
+}
+
+# When the workspace is a single worktree rather than a whole clone (a clone
+# whose other folders hold data other containers use, which must not be
+# relabelled), its git directory lives outside it: mount just that too.
+git_dir_mount() {
+  local ws="$1" common
+  common="$(git -C "${ws}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  case "${common}/" in
+    "${ws}"/*) ;;
+    *) printf '%s\n' "-v" "${common}:${common}:Z" ;;
+  esac
 }
 
 proxy_ip() {
@@ -171,8 +195,9 @@ egress_sets() {
     out="${DEFAULT_SETS}"
   fi
   # A repository with an L2 image of its own gets it built in the engine by
-  # `l2`, and that build installs from Ubuntu's archive.
-  [ -f "${src}/.devcontainer/l2/Dockerfile" ] && out="${out:+${out},}ubuntu"
+  # `l2`, and that build installs from Ubuntu's archive and, through the
+  # source the shared L2 image enables, NodeSource's.
+  [ -f "${src}/.devcontainer/l2/Dockerfile" ] && out="${out:+${out},}ubuntu,nodesource"
   echo "${out}"
 }
 
@@ -273,7 +298,7 @@ start_ssh_agent() {
 }
 
 start_engine() {
-  local ws="$1" name dir extra=() p
+  local ws="$1" name dir extra=() p gitdir=()
   name="$(engine_name "${ws}")"
   dir="$(engine_dir "${ws}")"
   running "${name}" && return
@@ -289,6 +314,7 @@ start_engine() {
   mkdir -p "${dir}"
   chmod 700 "${dir}"
   set_proxy_env "${ws}"
+  mapfile -t gitdir < <(git_dir_mount "${ws}")
   podman volume exists "${name}" || podman volume create "${name}" >/dev/null
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
@@ -296,7 +322,7 @@ start_engine() {
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" --device /dev/fuse \
     "${extra[@]}" \
     --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
-    -v "${ws}:${ws}:Z" \
+    -v "${ws}:${ws}:Z" "${gitdir[@]}" \
     -v "${dir}:/run/l2-engine:Z" \
     -v "${name}:/home/dev/.local/share/containers" \
     "${ENGINE_IMAGE}" >/dev/null
@@ -308,11 +334,12 @@ start_engine() {
 }
 
 start_workbench() {
-  local ws="$1" name
+  local ws="$1" name gitdir=()
   name="$(wb_name "${ws}")"
   running "${name}" && return
   mkdir -p "${DATA}/claude" "${DATA}/codex"
   set_proxy_env "${ws}"
+  mapfile -t gitdir < <(git_dir_mount "${ws}")
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" \
@@ -322,7 +349,7 @@ start_workbench() {
     -e GIT_COMMITTER_NAME="$(git config --get user.name || true)" -e GIT_COMMITTER_EMAIL="$(git config --get user.email || true)" \
     -e SSH_AUTH_SOCK=/run/devcontainer-ssh/agent.sock \
     -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
-    -v "${ws}:${ws}:Z" \
+    -v "${ws}:${ws}:Z" "${gitdir[@]}" \
     -v "${DATA}/claude:/home/dev/.claude:Z" \
     -v "${DATA}/codex:/home/dev/.codex:Z" \
     -v "${GH_DIR}:/run/gh-broker" \
