@@ -1,0 +1,2 @@
+description = "Trivy's vulnerability database mirror. Its version check (check.trivy.dev) is left out on purpose."
+domains = ["mirror.gcr.io"]

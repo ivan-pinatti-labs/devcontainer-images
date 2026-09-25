@@ -1,0 +1,7 @@
+description = "GitHub's container registry, where this organization's images are published."
+domains = ["ghcr.io", "pkg-containers.githubusercontent.com"]
+
+[provider]
+name = "github-meta"
+ip_keys = ["packages", "web"]
+enforce_ips = true

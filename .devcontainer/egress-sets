@@ -1,0 +1,12 @@
+# Egress sets this repository needs beyond workbench and github (always on).
+# `podman run --rm localhost/devcontainer-egress-proxy:local egress-refresh --list`
+python
+node
+golang
+ubuntu
+nodesource
+sigstore
+docker-hub
+quay
+ghcr
+trivy

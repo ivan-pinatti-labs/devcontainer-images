@@ -1,0 +1,2 @@
+description = "The Go module proxy and checksum database, for go and for pre-commit's golang hook environments."
+domains = ["proxy.golang.org", "sum.golang.org"]

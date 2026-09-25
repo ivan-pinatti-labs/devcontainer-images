@@ -1,0 +1,2 @@
+description = "Quay, Red Hat's container registry: the registry and its download CDN."
+domains = ["quay.io", "cdn01.quay.io", "cdn02.quay.io", "cdn03.quay.io"]

@@ -1,0 +1,2 @@
+description = "Ubuntu's apt archive, for building images."
+domains = ["archive.ubuntu.com", "security.ubuntu.com"]

@@ -1,0 +1,2 @@
+description = "Sigstore's trust root, which `npm audit signatures` and cosign read to verify a signature."
+domains = ["tuf-repo-cdn.sigstore.dev"]

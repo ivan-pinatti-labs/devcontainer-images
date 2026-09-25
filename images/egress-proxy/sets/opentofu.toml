@@ -1,0 +1,2 @@
+description = "OpenTofu: the provider and module registry and its downloads."
+domains = ["registry.opentofu.org", "get.opentofu.org", "packages.opentofu.org"]

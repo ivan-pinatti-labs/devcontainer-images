@@ -16,6 +16,8 @@ devcontainer-images has the full picture):
   commands; interactive prompts are not available, so pass the flags a
   prompt would ask for. A refusal names the allowlist.
 - `git push` works over ssh through an agent that holds the key.
-- Network access leaves through an allowlist proxy. A "403 Filtered" means
-  the host is not on it; say so rather than working around it.
+- Network access leaves through an egress proxy that allows only the egress
+  sets this repository lists in `.devcontainer/egress-sets`. A "403
+  Forbidden" from the proxy means the host is in none of them; say so, and
+  name the set it would belong to, rather than working around it.
 - Your settings and logins here are separate from anything on the host.

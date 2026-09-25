@@ -1,0 +1,12 @@
+description = "GitHub: the website, git over https and over ssh on port 443, the API, release, archive and raw downloads, the gh apt repository. Always on."
+domains = [
+  "github.com", "api.github.com", "codeload.github.com", "ssh.github.com", "cli.github.com",
+  "objects.githubusercontent.com", "raw.githubusercontent.com", "release-assets.githubusercontent.com",
+]
+
+# GitHub publishes its address ranges and domains at api.github.com/meta. The
+# ranges are enforced: an allowed name has to resolve inside them.
+[provider]
+name = "github-meta"
+ip_keys = ["web", "api", "git"]
+enforce_ips = true

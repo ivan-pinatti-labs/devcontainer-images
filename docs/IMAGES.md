@@ -13,7 +13,7 @@ with, and why they are split this way, is in [LAYERS.md](LAYERS.md).
 | `l2` | base | pre-commit, node, go, shellcheck, the baked linters, a podman client for `--engine` runs |
 | `l2-engine` | base | rootless podman serving a socket (the nested runtime below) |
 | `gh-broker` | base | gh and the broker |
-| `egress-proxy` | base | tinyproxy and its allowlist |
+| `egress-proxy` | base | squid, the egress sets and the program that refreshes them |
 
 There is **no version manager** in any of them. Tools come from signed
 package repositories, installed with apt; `TOOL_SOURCES.md` is the reference

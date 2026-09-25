@@ -1,0 +1,2 @@
+description = "PyPI, for pip and for pre-commit's python hook environments."
+domains = ["pypi.org", "files.pythonhosted.org"]

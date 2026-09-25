@@ -1,0 +1,2 @@
+description = "HashiCorp: the apt repository, release downloads and the Terraform registry. The checkpoint-api telemetry host is left out on purpose."
+domains = ["apt.releases.hashicorp.com", "releases.hashicorp.com", "registry.terraform.io"]

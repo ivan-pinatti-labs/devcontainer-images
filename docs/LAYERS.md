@@ -3,7 +3,7 @@
 How the images in this repository fit together, what each one is allowed to
 see, and how to use them day to day.
 
-<!-- cspell:words tinyproxy userns initializeCommand -->
+<!-- cspell:words tinyproxy userns initializeCommand codeload -->
 
 ## Why layers
 
@@ -22,7 +22,7 @@ The layers separate what you trust from what you only run.
 host         podman, the VS Code desktop, podman secrets. Nothing else runs here.
  ├─ ssh-agent        holds the ssh key; the key never leaves it
  ├─ gh-broker        holds the GitHub token; runs allowlisted gh commands
- ├─ egress-proxy     the only way out to the network, by allowlist
+ ├─ egress-proxy     one per workspace: the only way out, by egress sets
  ├─ workbench        you, the coding agents, the editor's extensions, git
  │                   no GitHub token, no ssh key, no direct network,
  │                   no container runtime
@@ -36,7 +36,7 @@ host         podman, the VS Code desktop, podman secrets. Nothing else runs here
 | host | podman, the editor's window | everything, which is why nothing else runs here |
 | ssh-agent | `ssh-agent` | nothing: no network, read only, no capabilities |
 | gh-broker | `gh` with the token | GitHub, for the commands in its allowlist |
-| egress-proxy | tinyproxy | the hosts in its allowlist |
+| egress-proxy | squid, one per workspace | the domains of its workspace's egress sets |
 | workbench | Claude Code, Codex, the VS Code server and its extensions, git | the proxy, the broker socket, the agent socket, the engine socket, the workspace |
 | L2 engine | rootless podman | the proxy, the workspace |
 | L2 | pre-commit hooks, tests, package installs, anything the agents run that executes project code | the working tree, and the proxy only when a run asks for network |
@@ -228,19 +228,69 @@ unlock` adds the key for eight hours at a time.
 
 ## Network
 
-The workbench and the engine are on an internal podman network with no route
-and no DNS. Their only way out is the egress proxy, which forwards HTTPS to
-the hosts in `images/egress-proxy/allowlist` and answers everything else with
-`403 Filtered`. Measured 2026-09-24: GitHub, Anthropic, OpenAI, the
-Marketplace and the package registries connect; the kind of endpoints recent
-extension malware used (a blockchain RPC endpoint, a calendar API, a paste
-site) do not; direct connections and external DNS do not exist. `podman logs
-egress-proxy` shows what was refused, which is the first place to look when a
-tool fails to download something.
+Each workspace has an internal podman network of its own (no route, no DNS)
+holding its workbench and its L2 engine, and an egress proxy of its own on
+that network, which is their only way out. One project's allowances never
+apply to another's.
 
-The proxy decides by host name without inspecting TLS, so it cannot stop
-data leaving through a host it allows (a gist on github.com, for instance).
-It stops what is not on the list; it does not make the list safe.
+### Egress sets
+
+What a proxy allows is built from **egress sets**, one per service, in
+`images/egress-proxy/sets/`:
+
+| Set | Allows | Provider list, refreshed |
+| --- | --- | --- |
+| `workbench` (always) | the agents' APIs, VS Code server and extension downloads, their certificate checks | |
+| `github` (always) | github.com, the API, codeload, ssh over 443, release and raw downloads | GitHub's ranges from `api.github.com/meta`, enforced |
+| `ghcr` | GitHub's container registry | GitHub's ranges, enforced |
+| `python`, `node`, `golang` | PyPI, npm, the Go module proxy | |
+| `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
+| `docker-hub`, `quay` | those registries and their CDNs | |
+| `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
+| `alpine`, `trivy`, `sigstore` | Alpine packages, trivy's database, sigstore's trust root | |
+| `aws` | AWS service APIs | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
+
+`podman run --rm localhost/devcontainer-egress-proxy:local egress-refresh
+--list` prints them with their descriptions. A repository lists the sets it
+needs in `.devcontainer/egress-sets`, one per line (with no file: `python`,
+`node`, `golang`); `workbench` and `github` are always added. An unknown name
+stops the proxy from starting, and the error lists the known ones.
+
+A set is a small TOML file: a description, its domains (`example.com` for
+that name alone, `*.example.com` for it and every name under it), and
+optionally a provider whose published list is fetched by the proxy. Where a
+set enforces its provider's ranges, a request passes only when its name is on
+the set's list **and** the address the name resolves to lies inside those
+ranges (measured 2026-09-25: `pypi.org` placed in a set bound to GitHub's
+ranges was refused, `github.com` in the same set passed). Adding a service is
+adding a file; adding a provider is a function in
+`images/egress-proxy/bin/egress-refresh`.
+
+### Keeping the lists current
+
+The proxy fetches its providers' lists when it starts and every six hours
+(`EGRESS_REFRESH_SECONDS`), merges overlapping ranges, and reloads squid in
+place. The last good copy is kept in the `egress-cache` volume. A fetch that
+fails falls back to that copy, saying how old it is; with no copy at all the
+set keeps its static domains without the address check, and says so loudly.
+That last case favours availability on purpose: a provider's API being down
+should not stop anyone working while the domain list still holds.
+
+### The proxy
+
+squid, tuned to decide and forward only (no cache, small lookup tables): 13
+MB resident with seven sets and every AWS range loaded, measured 2026-09-25,
+against 89 MB with squid's defaults. tinyproxy, which Qubes OS uses for its
+updates proxy, is lighter still (4 MB), but it can only match a host name,
+and checking where that name resolves is what makes a provider's ranges
+worth having. A refused request answers `403 Forbidden`, and `podman logs
+egress-proxy-<folder>` shows each decision (`TCP_DENIED` or `TCP_TUNNEL`,
+with the address the name resolved to), which is the first place to look
+when a tool fails to download something.
+
+The proxy decides by host name and address without inspecting TLS, so it
+cannot stop data leaving through a host it allows (a gist on github.com, for
+instance). It stops what is not on the list; it does not make the list safe.
 
 ## Extensions
 
@@ -253,7 +303,7 @@ the editor itself; VS Code has no sandbox for them. What limits them here:
   extension nor anything else in the workbench can install, update or replace
   one. Auto update is off.
 - They find no GitHub token and no ssh key, and reach only the hosts on the
-  proxy's allowlist.
+  workspace's egress sets.
 - The coding agents' own logins are readable in the workbench, which the
   agent extensions need. That is accepted: the worst case is someone using
   that subscription, and it can be revoked.

@@ -133,7 +133,7 @@ and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 | l2 | `images/l2/` | where hooks, tests and installs run; no network, no credentials |
 | l2-engine | `images/l2-engine/` | the rootless podman that starts L2 containers |
 | gh-broker | `images/gh-broker/` | holds the GitHub token; runs allowlisted gh commands |
-| egress-proxy | `images/egress-proxy/` | the only way out to the network, by allowlist |
+| egress-proxy | `images/egress-proxy/` | one per workspace, the only way out to the network, by egress sets |
 
 `host/workbench` starts them; it runs on the host and does nothing there but
 call podman.
@@ -142,8 +142,8 @@ call podman.
   the ssh-agent; project code runs nowhere but L2; the workbench carries
   nothing that executes project code. A change that moves one of those lines
   needs saying out loud in the pull request, with the measurement behind it.
-- Widening an allowlist (egress hosts, gh commands, extensions, workbench
-  profiles) is a reviewed change of its own, never folded into something
+- Widening an allowlist (an egress set or a new one, gh commands,
+  extensions, workbench profiles) is a reviewed change of its own, never folded into something
   else. Extensions are pinned to a version at least seven days old.
 - Files the agents are held to (`images/workbench/claude/`,
   `images/workbench/codex/`, `images/workbench/bin/route-to-l2`) are policy,
