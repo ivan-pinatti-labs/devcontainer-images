@@ -1,0 +1,6 @@
+#!/bin/sh
+# `podman` for an `l2 --engine` run (`docker` is bin/docker, which hands
+# everything it does not bake itself to the same place): a client of the L2 engine, for test
+# suites that build and start containers of their own. Only on PATH in that
+# mode.
+exec podman-remote "$@"

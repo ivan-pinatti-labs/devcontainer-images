@@ -20,11 +20,15 @@
   worktrees are included), else the current directory.
 
   A workspace can opt in to more for its L2 engine, by listing profile names
-  in .devcontainer/workbench-profile (one per line). Only the names below are
+  in .devcontainer/workbench-profile (one per line), read from the checkout
+  `up` runs in (a worktree counts), else from the workspace. Only the names below are
   understood; anything else stops `up`, so a repository cannot pass arbitrary
   flags to podman on the host:
     nested-network   L2 containers get a bridge network of their own, so a
                       test suite can start containers that reach each other
+    hooks-engine     pre-commit runs get the engine too (l2 --engine), for
+                      hooks that build or start containers; nothing on the
+                      host side
     nested-devices   L2 containers may be given /dev/fuse and /dev/net/tun.
                       Needs the host SELinux module in host/selinux/, which
                       only root can install (docs/IMAGES.md)
@@ -93,13 +97,22 @@ wb_name() { echo "workbench-$(slug "$1")"; }
 engine_name() { echo "l2-engine-$(slug "$1")"; }
 engine_dir() { echo "${RUN}/workbench/$(slug "$1")"; }
 
+profile_source() {
+  local ws="$1" top
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  case "${top}/" in
+    "${ws}"/*) echo "${top}" ;;
+    *) echo "${ws}" ;;
+  esac
+}
+
 profiles() {
-  local f="$1/.devcontainer/workbench-profile" p
+  local f="$(profile_source "$1")/.devcontainer/workbench-profile" p
   [ -f "${f}" ] || return 0
   while read -r p; do
     case "${p}" in
       '' | '#'*) ;;
-      nested-network | nested-devices) echo "${p}" ;;
+      nested-network | nested-devices | hooks-engine) echo "${p}" ;;
       *) die "unknown profile '${p}' in ${f}" ;;
     esac
   done < "${f}"

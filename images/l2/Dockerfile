@@ -35,6 +35,8 @@ USER 0:0
 #                    fetching a Go toolchain
 #   shellcheck       actionlint runs it over `run:` blocks
 #   make             most repositories drive their tests through it
+#   podman-remote    a client, for `l2 --engine` runs whose tests build and
+#                    start containers through the L2 engine (see engine-bin)
 #
 # hadolint ignore=DL3008
 RUN printf '%s\n' \
@@ -45,6 +47,7 @@ RUN printf '%s\n' \
     golang-go \
     make \
     nodejs \
+    podman-remote \
     pre-commit \
     python3-venv \
     shellcheck \
@@ -60,6 +63,7 @@ COPY --from=dotenv-linter /dotenv-linter /usr/local/bin/dotenv-linter
 ENV L2_BAKED_IMAGES="ghcr.io/hadolint/hadolint=v2.15.1 docker.io/rhysd/actionlint=1.7.12 docker.io/dotenvlinter/dotenv-linter=4.0.0"
 
 COPY bin/docker bin/l2-prepare-hooks bin/actionlint /usr/local/bin/
+COPY engine-bin/ /usr/local/lib/l2/engine-bin/
 
 # The L2 wrapper runs everything here as uid 0 (--user 0:0, overriding the
 # USER below), which inside the workbench's

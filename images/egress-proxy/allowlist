@@ -33,3 +33,5 @@
 ^registry\.opentofu\.org$
 ^get\.opentofu\.org$
 ^packages\.opentofu\.org$
+^dl-cdn\.alpinelinux\.org$
+^mirror\.gcr\.io$

@@ -58,8 +58,9 @@ USER 0:0
 #   socat            carries that ssh connection through the egress proxy,
 #                    and relays Claude Code's sandbox network
 #   make             most repositories drive their tasks with it
-#   podman           only as a client of the L2 engine's socket
-#                    (CONTAINER_HOST below); nothing nests in here
+#   podman-remote    a client of the L2 engine's socket (CONTAINER_HOST
+#                    below), installed as `podman`. There is no container
+#                    runtime in here at all
 #   bubblewrap, ripgrep
 #                    Claude Code's own sandbox for the commands it runs
 #
@@ -76,10 +77,11 @@ RUN printf '%s\n' \
     make \
     nodejs \
     openssh-client \
-    podman \
+    podman-remote \
     ripgrep \
     socat \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && ln -s /usr/bin/podman-remote /usr/local/bin/podman
 
 # The coding agent CLIs, pinned, installed with lifecycle scripts off, checked
 # with `npm audit signatures`, and only then allowed to run the one

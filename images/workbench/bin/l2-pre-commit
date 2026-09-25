@@ -11,6 +11,10 @@
   the run. Afterwards they are compared with before, and a run in which a hook
   actually changed one fails, naming the files, so nothing lands there unseen.
 
+  A repository whose hooks build or start containers of their own lists
+  hooks-engine in .devcontainer/workbench-profile, and its runs get the L2
+  engine (l2 --engine).
+
   Hooks that can only work with the open internet (link checkers) are skipped
   here and left to CI: L2 runs hooks with no network. L2_SKIP_HOOKS overrides
   the list; SKIP adds to it, as with pre-commit itself.
@@ -31,9 +35,14 @@ protected() {
 }
 
 cd "$(git rev-parse --show-toplevel)"
+engine=""
+if [ -f .devcontainer/workbench-profile ] && grep -qx hooks-engine .devcontainer/workbench-profile; then
+  engine="--engine"
+fi
 before="$(protected)"
 status=0
-l2 --protected-rw --env "SKIP=${skip}" -- pre-commit "$@" || status=$?
+# shellcheck disable=SC2086 # ${engine} is one flag or nothing
+l2 ${engine} --protected-rw --env "SKIP=${skip}" -- pre-commit "$@" || status=$?
 after="$(protected)"
 if [ "${before}" != "${after}" ]; then
   echo "" >&2

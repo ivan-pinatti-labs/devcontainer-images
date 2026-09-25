@@ -88,9 +88,9 @@ reviewed GitHub certificates. All three stop the build.
 
 **Installing a key grants nothing on its own.** apt reads a keyring only when
 a `sources.list` entry names it with `signed-by=`. The base image ships the
-keys and enables none of the repositories, the same way it ships rootless
-Podman and leaves nesting opt in. A repository that wants one of these tools
-adds its own source entry.
+keys and enables none of the repositories. An image that wants one of these
+tools adds its own source entry (the workbench enables NodeSource, the gh
+broker GitHub's, a repository's L2 image HashiCorp's).
 
 ## Enabling a repository
 
@@ -124,18 +124,25 @@ side of the diff and the pull request waits for a person.
 
 ## Every tool
 
-| Tool | Source | Provenance | Notes |
+Which image each tool is in follows from the layers ([LAYERS.md](LAYERS.md)):
+credentials and agents in the workbench, project tooling in L2.
+
+| Tool | Source | Provenance | Where |
 | --- | --- | --- | --- |
-| git, curl, jq, make, python3, openssh-client, procps | Ubuntu | distribution repository signature | in the base image |
-| podman, podman-docker, crun, catatonit, fuse-overlayfs, passt, nftables, uidmap, libcap2-bin | Ubuntu | distribution repository signature | in the base image, inert until a repository opts in to nesting |
-| pre-commit | Ubuntu | distribution repository signature | 4.5.1 on 26.04, against the 4.6.2 the retired asdf pin named |
-| shellcheck | Ubuntu | distribution repository signature | 0.11.0, the same version the retired asdf pin named |
-| github-cli | `cli.github.com/packages stable main` | repository signature | 2.101.0, ahead of the retired pin |
-| nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | 24.21.0, the same version the retired pin named; in the base image, because both agent CLIs run on it |
-| terraform | `apt.releases.hashicorp.com resolute main` | repository signature | 1.16.3, ahead of the retired pin |
-| tflint | `ghcr.io/terraform-linters/tflint`, pinned by digest | container image published by the project | see below |
-| claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | in the base image, see below |
-| codex (Codex CLI) | npm `@openai/codex`, version pinned | npm registry signature **and** SLSA build provenance | in the base image, see below |
+| git, curl, jq, python3, procps | Ubuntu | distribution repository signature | base |
+| podman, crun, catatonit, fuse-overlayfs, passt, nftables, uidmap, libcap2-bin, podman-compose | Ubuntu | distribution repository signature | L2 engine |
+| podman-remote | Ubuntu | distribution repository signature | workbench (as `podman`) and L2, clients of the engine only |
+| pre-commit | Ubuntu | distribution repository signature | L2; 4.5.1 on 26.04 |
+| shellcheck, golang-go, make | Ubuntu | distribution repository signature | L2 (make also in the workbench) |
+| bubblewrap, socat, ripgrep, openssh-client | Ubuntu | distribution repository signature | workbench |
+| tinyproxy | Ubuntu | distribution repository signature | egress proxy |
+| github-cli | `cli.github.com/packages stable main` | repository signature | gh broker only; the workbench's `gh` is a shim that asks the broker |
+| nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | workbench (the agent CLIs run on it) and L2 (node hooks) |
+| terraform | `apt.releases.hashicorp.com resolute main` | repository signature | the L2 image of the repository that uses it |
+| hadolint, actionlint, dotenv-linter | the projects' official images, pinned by digest | container image published by the project | L2, copied out of those images, because L2 cannot start containers |
+| claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | workbench, see below |
+| codex (Codex CLI) | npm `@openai/codex`, version pinned | npm registry signature **and** SLSA build provenance | workbench, see below |
+| VS Code extensions | the Visual Studio Marketplace, version pinned | Marketplace signature, checked on install | workbench, read only; `images/workbench/vscode/extensions.txt` |
 
 ### tflint is the exception
 
@@ -214,41 +221,18 @@ changing one by hand rather than letting Renovate do it.
 
 ## Getting a shell without an IDE
 
-Every repository with a development container carries a `make shell` target,
-so the container is usable from an ordinary terminal and nothing here
-requires an editor. The target builds the container and runs it with the
-repository mounted at `/workspace`, plus the two agent configuration
-directories bind mounted from the host:
+`host/workbench up` starts the workbench and its helpers, and
+`host/workbench shell` is a terminal in it, so nothing here requires an
+editor; [LAYERS.md](LAYERS.md) has the daily routine.
 
-The target builds the container, then runs it roughly like this:
-
-```shell
-podman run --rm -it --userns=keep-id \
-  -v "${PWD}:/workspace:rw,Z" \
-  -v "${HOME}/.claude:/home/dev/.claude:rw,z" \
-  -v "${HOME}/.codex:/home/dev/.codex:rw,z" \
-  -w /workspace "${DEV_IMAGE}" bash
-```
-
-The authoritative version is the `shell` target in each repository's own
-`Makefile`, not this sketch.
-
-Sessions, transcripts and credentials therefore live on the host and survive
-the container, and the same history is visible whether an agent is run from
-this shell or from the host.
-
-Two things about those two mounts specifically:
-
-- **Lowercase `z`, not uppercase `Z`.** `Z` labels a mount private to one
-  container, and applying it to a directory the host's own agents also use
-  would take that directory away from them and from every other repository's
-  container. `z` is the shared label, which is what a directory used by more
-  than one consumer needs.
-- **`SHELL_EXTRA_MOUNTS` exists for symlinks that leave the tree.** A bind
-  mount carries a symlink as a symlink, so if anything under `~/.claude`
-  points outside `~/.claude`, it dangles inside the container until its
-  target is mounted too. That is a per machine detail, so it is a variable
-  rather than a hard coded path.
+The agents' logins and settings live in `~/.local/share/workbench/claude`
+and `codex` on the host, mounted into the workbench. They are deliberately
+not your own `~/.claude` and `~/.codex`. An earlier version of this page
+mounted those read write, which let anything running in the development
+container (a pre-commit hook, an npm postinstall script) edit the settings
+the agents on the host read, hooks included: code execution on the host by
+another name. The price is logging the agents in once more, inside the
+workbench.
 
 ## What the scanners see now
 

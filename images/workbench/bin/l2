@@ -4,12 +4,17 @@
   and only the working tree mounted. docs/LAYERS.md explains the layers.
 
   Usage:
-    l2 [--net] [--ro] [--protected-rw] [--env NAME=VALUE] [--image IMAGE] [--] COMMAND [ARGS...]
+    l2 [--net] [--ro] [--engine] [--protected-rw] [--env NAME=VALUE] [--image IMAGE] [--] COMMAND [ARGS...]
 
   Options:
     --net     give the container network access, through the egress proxy
               only (installs: pip, npm, pre-commit install-hooks)
     --ro      mount the working tree read only
+    --engine  for test suites that build and start containers themselves:
+              give this run the L2 engine socket (`docker` and `podman` in
+              it talk to the engine) and a scratch directory, TMPDIR, that
+              the containers it starts can mount at the same path. Those
+              containers are L2 as well; the engine holds no credentials
     --protected-rw
               leave PROTECTED writable too. Only for the git hooks, which
               compare those paths before and after and refuse a commit a
@@ -45,12 +50,14 @@ PROTECTED=(.devcontainer .vscode .claude .codex Makefile host)
 net=false
 ro=false
 protect=true
+engine=false
 image=""
 envs=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --net) net=true; shift ;;
     --ro) ro=true; shift ;;
+    --engine) engine=true; shift ;;
     --protected-rw) protect=false; shift ;;
     --image) image="$2"; shift 2 ;;
     --env) envs+=(-e "$2"); shift 2 ;;
@@ -97,6 +104,18 @@ fi
 image="${image:-${L2_IMAGE:?l2: no image, set L2_IMAGE or .devcontainer/l2-image}}"
 
 args+=(-v "l2-home-${key//[^A-Za-z0-9_.-]/_}:/root" -w "${PWD}")
+
+if [ "${engine}" = true ]; then
+  # Paths on the engine side, where this container runs.
+  sock=/run/l2-engine/podman.sock
+  scratch=/var/tmp/l2-scratch
+  # sys_chroot, inside L2's own user namespace only: podman-remote's copier
+  # chroots into the destination of a `docker cp` out of a container.
+  args+=(--cap-add=sys_chroot -v "${sock}:${sock}" -v "${scratch}:${scratch}"
+    -e "CONTAINER_HOST=unix://${sock}" -e "DOCKER_HOST=unix://${sock}"
+    -e "TMPDIR=${scratch}"
+    -e "PATH=/usr/local/lib/l2/engine-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+fi
 
 if [ "${net}" = true ]; then
   for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy NODE_USE_ENV_PROXY; do
