@@ -89,7 +89,9 @@ TAG="${WORKBENCH_TAG:-local}"
 BASE="localhost/devcontainer-base:${TAG}"
 # One workbench image per agent, built from the same Dockerfile.
 wb_image() { echo "localhost/devcontainer-workbench-$1:${TAG}"; }
-AGENTS="${WORKBENCH_AGENTS:-claude codex}"
+# Every agent there is a workbench for, and the ones `up` starts.
+KNOWN_AGENTS="claude codex"
+AGENTS="${WORKBENCH_AGENTS:-${KNOWN_AGENTS}}"
 L2_IMAGE="localhost/devcontainer-l2:${TAG}"
 ENGINE_IMAGE="localhost/devcontainer-l2-engine:${TAG}"
 BROKER_IMAGE="localhost/devcontainer-gh-broker:${TAG}"
@@ -400,7 +402,7 @@ start_workbench() {
 }
 
 cmd_up() {
-  local ws
+  local ws agent
   ws="$(workspace "${1:-}")"
   profiles "${ws}" >/dev/null
   case "${ws}/" in
@@ -474,14 +476,19 @@ cmd_unlock() {
 # in the folder you are in when it is inside the workspace.
 cmd_shell() {
   local agent="${1:-}" ws name cwd
-  case " ${AGENTS} " in
-    *" ${agent} "*) ;;
+  case " ${KNOWN_AGENTS} " in
+    *" ${agent:-none} "*) ;;
     *) echo "workbench: which agent? host/workbench shell claude|codex [WORKSPACE]" >&2; exit 2 ;;
   esac
   ws="$(workspace "${2:-}")"
   shift 2 2>/dev/null || shift $#
   name="$(wb_name "${ws}" "${agent}")"
-  running "${name}" || cmd_up "${ws}" >/dev/null
+  # An agent asked for by name starts even when WORKBENCH_AGENTS leaves it
+  # out of `up`.
+  if ! running "${name}"; then
+    cmd_up "${ws}" >/dev/null
+    running "${name}" || start_workbench "${ws}" "${agent}"
+  fi
   cwd="${PWD}"
   case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
   exec podman exec -it -w "${cwd}" "${name}" "${@:-bash}"
