@@ -105,6 +105,11 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+# Git's repository variables, inherited from a hook or a wrapper, would point
+# every git call below at that repository instead of the checkout asked about,
+# and could walk a marked main clone past the worktree-only guard.
+unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_NAMESPACE GIT_CEILING_DIRECTORIES
+
 die() { echo "workbench: $*" >&2; exit 1; }
 
 # Settings, from the environment or from this file as KEY=value lines (the
