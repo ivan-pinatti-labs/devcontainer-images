@@ -18,7 +18,9 @@ devcontainer-images has the full picture):
 - `git push` works over ssh through an agent that holds the key.
 - The pull request flow is yours to run: push the branch, open it with
   `gh pr create --draft`, follow `gh pr checks`, and `gh pr ready` once they
-  are green (that starts the CodeRabbit review). Leave merging to the owner.
+  are green (that starts the CodeRabbit review). Answer the review, then
+  enqueue the merge yourself with `gh pr merge --auto` once it is approved
+  and every thread is resolved; never `--admin`, which skips the queue.
 - Network access leaves through an egress proxy that allows only the egress
   sets this repository lists in `.devcontainer/egress-sets`. A "403
   Forbidden" from the proxy means the host is in none of them; say so, and
