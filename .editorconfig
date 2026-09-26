@@ -33,5 +33,5 @@ indent_size = unset
 max_line_length = off
 trim_trailing_whitespace = false
 
-[Makefile]
+[{Makefile,*.mk}]
 indent_style = tab
