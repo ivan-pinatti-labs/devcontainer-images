@@ -44,7 +44,10 @@
   own path. Default: the main clone of the git repository you are in (so its
   worktrees are included), else the current directory. A single worktree
   works too, for a clone whose other folders hold data that must not be
-  relabelled; its git directory is then mounted as well. Workspaces live under
+  relabelled; its git directory is then mounted as well. A repository that
+  holds such data marks itself with .devcontainer/workbench-worktree-only,
+  and then the worktree you are in is the default, and its main clone is
+  refused. Workspaces live under
   WORKBENCH_ROOT (default: the folder holding this clone), which the gh
   broker sees read only, so gh finds the repository a command ran in.
 
@@ -172,7 +175,7 @@ check_owner() {
 }
 
 workspace() {
-  local w="${1:-}"
+  local w="${1:-}" top common
   if [ -z "${w}" ]; then
     if common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
       w="$(dirname "${common}")"
@@ -180,7 +183,21 @@ workspace() {
       w="${PWD}"
     fi
   fi
-  (cd "${w}" && pwd)
+  w="$(cd "${w}" && pwd)"
+  # A repository whose main clone holds data other containers use (a running
+  # stack's volumes, say) marks itself worktree only, in its main clone or in
+  # the checkout you are in: its workspace is then that worktree, and never
+  # the main clone, which up would relabel under those containers.
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -d "${w}/.git" ] && { [ -f "${w}/.devcontainer/workbench-worktree-only" ] \
+    || { [ -n "${top}" ] && [ -f "${top}/.devcontainer/workbench-worktree-only" ]; }; }; then
+    if [ -z "${1:-}" ] && [ -n "${top}" ] && [ "${top}" != "${w}" ]; then
+      w="${top}"
+    else
+      die "${w} is developed from worktrees only (.devcontainer/workbench-worktree-only): its main clone holds data other containers use. Run this from a worktree, git -C ${w} worktree add .claude/worktrees/<name>"
+    fi
+  fi
+  echo "${w}"
 }
 
 # A workspace's name: the folder's own name, or <clone>-<worktree> for a

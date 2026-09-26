@@ -156,6 +156,16 @@ to each other, `hooks-engine` for hooks that build or start containers,
 that file stops `up`, so a repository cannot pass arbitrary flags to podman
 on the host.
 
+A repository whose main clone holds data other containers use (the volumes
+of a stack it runs, for instance) adds an empty
+`.devcontainer/workbench-worktree-only`. Its workspace is then always the
+worktree the command runs in, and `up` refuses the main clone, which it
+would otherwise mount and relabel under those containers.
+
+When a branch changes `.devcontainer/egress-sets` or adds an L2 image, start
+the workspace from that branch's worktree: the proxy takes its sets from the
+checkout `up` runs in.
+
 ## L2
 
 `l2 COMMAND` runs a command in a throwaway container, started by the engine
