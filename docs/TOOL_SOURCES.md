@@ -140,7 +140,7 @@ credentials and agents in the workbench, project tooling in L2.
 | nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | workbench (the agent CLIs run on it) and L2 (node hooks) |
 | terraform | `apt.releases.hashicorp.com resolute main` | repository signature | the L2 image of the repository that uses it |
 | hadolint, actionlint, dotenv-linter | the projects' official images, pinned by digest | container image published by the project | L2, copied out of those images, because L2 cannot start containers |
-| Go modules for golang hooks (checkmake, gitleaks) | the Go module proxy, at the versions in `images/l2/go-modules.txt` | Go's checksum database, checked at build time and again offline in L2 | L2, a read only module proxy; the hooks still build from source there |
+| Go modules for golang hooks (checkmake, gitleaks) | the Go module proxy, at the versions in `images/l2/go-modules.txt` | Go's checksum database, checked when the image is built; the image digest pins the result | L2, a read only module proxy; the hooks still build from source there |
 | claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | workbench, see below |
 | codex (Codex CLI) | npm `@openai/codex`, version pinned | npm registry signature **and** SLSA build provenance | workbench, see below |
 | VS Code extensions | the Visual Studio Marketplace, version pinned | Marketplace signature, checked on install | workbench, read only; `images/workbench/vscode/extensions.txt` |

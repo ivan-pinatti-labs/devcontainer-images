@@ -22,7 +22,12 @@ import threading
 
 ALLOW = json.load(open("/etc/gh-broker/allowlist.json"))
 COMMANDS = set(ALLOW["commands"])
-OWNERS = tuple(o.lower() + "/" for o in ALLOW["owners"])
+# The GitHub owners (users or organizations) whose repositories the broker
+# acts on: GH_BROKER_OWNERS from the host, comma separated, else the
+# allowlist's own. None built in, so each installation names its own.
+_OWNER_NAMES = [o.strip() for o in os.environ.get("GH_BROKER_OWNERS", "").split(",") if o.strip()] or ALLOW["owners"]
+OWNER_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+OWNERS = tuple(o.lower() + "/" for o in _OWNER_NAMES if OWNER_NAME.match(o))
 SOCK = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
 REPO_FLAGS = ("-R", "--repo")
 
@@ -241,7 +246,10 @@ def serve(conn):
 
 def main():
     if not os.environ.get("GH_TOKEN"):
-        print("gh-broker: GH_TOKEN is not set; start it with the gh-devcontainer podman secret", file=sys.stderr)
+        print("gh-broker: GH_TOKEN is not set; start it with the token's podman secret", file=sys.stderr)
+        return 1
+    if not OWNERS or len(OWNERS) != len(_OWNER_NAMES):
+        print("gh-broker: set GH_BROKER_OWNERS to the GitHub owners it may act on, comma separated (host: WORKBENCH_GH_OWNERS)", file=sys.stderr)
         return 1
     if os.path.exists(SOCK):
         os.unlink(SOCK)

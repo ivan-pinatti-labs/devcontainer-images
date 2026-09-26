@@ -1,6 +1,6 @@
 # The workbench
 
-You are running in the ivan-pinatti-labs workbench, a container, not on the
+You are running in a devcontainer-airlock workbench, a container, not on the
 host. What that means for the commands you run (docs/LAYERS.md in
 devcontainer-airlock has the full picture):
 

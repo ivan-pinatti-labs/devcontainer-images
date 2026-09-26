@@ -1,6 +1,8 @@
 """Allow and refuse cases for the gh broker, run when its image is built, so
 an allowlist or parser change that reopens one fails the build."""
+import os
 import sys
+os.environ["GH_BROKER_OWNERS"] = "ivan-pinatti-labs"
 src = open("/usr/local/libexec/gh-broker/broker.py").read()
 ns = {"__name__": "broker"}; exec(compile(src, "broker.py", "exec"), ns)
 allowed = ns["allowed"]
@@ -52,6 +54,14 @@ argv_cases = [
   (False, Q + ["query=mutation"]),
 ]
 bad = [(exp, c) for exp, c in cases if allowed(c.split()) != exp]
+# Owners come from the environment, and nothing is allowed without them.
+for env, exp in [("", 0), ("evil name", 0), ("ivan-pinatti-labs", 1)]:
+    os.environ["GH_BROKER_OWNERS"] = env
+    fresh = {"__name__": "broker"}; exec(compile(src, "broker.py", "exec"), fresh)
+    ok = len(fresh["OWNERS"]) == exp and fresh["allowed"]("pr view 1 -R ivan-pinatti-labs/x".split()) == bool(exp)
+    if not ok:
+        bad.append((bool(exp), f"GH_BROKER_OWNERS={env!r}"))
+    cases.append((bool(exp), env))
 bad += [(exp, " ".join(a)) for exp, a in argv_cases if allowed(a) != exp]
 cases += argv_cases
 for exp, c in bad: print("WRONG", "expected", "allow" if exp else "refuse", ":", c)

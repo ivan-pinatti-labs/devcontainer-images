@@ -56,8 +56,17 @@ Once, on the host:
 ```shell
 podman secret create gh-devcontainer /path/to/a/file/holding/the/token
 ssh-keygen -t ed25519 -C devcontainer -f ~/.ssh/devcontainer/id_ed25519
-host/workbench build
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/workbench"
+echo WORKBENCH_GH_OWNERS=<your user or organization> >> "${XDG_CONFIG_HOME:-$HOME/.config}/workbench/config"
+make workbench-pull      # the published images; or make workbench-build
 ```
+
+`~/.config/workbench/config` holds the settings, one `KEY=value` per line; it
+is read and never run, and an environment variable of the same name wins.
+`WORKBENCH_GH_OWNERS` is the one without a default: the GitHub users or
+organizations whose repositories the broker may act on, comma separated.
+The others (the secret name, the key path, where the workspaces live, which
+agents start) are listed by `host/workbench help`.
 
 The token is a fine grained personal access token for the organization with:
 
@@ -146,6 +155,16 @@ to each other, `hooks-engine` for hooks that build or start containers,
 `nested-devices` for FUSE or TUN inside those containers. Anything else in
 that file stops `up`, so a repository cannot pass arbitrary flags to podman
 on the host.
+
+A repository whose main clone holds data other containers use (the volumes
+of a stack it runs, for instance) adds an empty
+`.devcontainer/workbench-worktree-only`. Its workspace is then always the
+worktree the command runs in, and `up` refuses the main clone, which it
+would otherwise mount and relabel under those containers.
+
+When a branch changes `.devcontainer/egress-sets` or adds an L2 image, start
+the workspace from that branch's worktree: the proxy takes its sets from the
+checkout `up` runs in.
 
 ## L2
 
@@ -355,12 +374,16 @@ So golang hooks do not use it. pre-commit builds them from source, which
 means they need Go modules rather than a binary, and the L2 image carries
 exactly those modules as a read only module proxy
 (`images/l2/go-modules.txt`), fetched and verified against Go's checksum
-database in a throwaway stage of the image build. L2 runs with `GOPROXY`
-pointing there and nowhere else, and checks the checksum database entries it
-carries, all offline. A hook pinned to a version missing from the list fails
-with "module lookup disabled by GOPROXY=off": bump the list first, then the
-pin. Select `golang` only to build Go against the network, as building the
-L2 image itself does.
+database in a throwaway stage of the image build. The same installs then run
+again from that proxy alone, offline, so a module missing from it fails the
+image build. L2 runs with `GOPROXY` pointing there and nowhere else, and
+does not ask the checksum database again: the check happened at build time,
+and the image digest pins the result. (Asking it offline did not work:
+measured 2026-09-26, a lookup recorded at one tree size could not be proved
+against the later tree head without tiles the build never fetched.) A hook
+pinned to a version missing from the list fails with "module lookup disabled
+by GOPROXY=off": bump the list first, then the pin. Select `golang` only
+to build Go against the network, as building the L2 image itself does.
 
 ## Extensions
 
