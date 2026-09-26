@@ -10,7 +10,7 @@
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
-.PHONY: claude codex claude-shell codex-shell unlock workbench-help workbench-up workbench-down workbench-status workbench-build
+.PHONY: claude codex claude-shell codex-shell unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 
@@ -26,7 +26,8 @@ workbench-help:
 		'  workbench-up                Start this repository workbenches, L2 engine and proxy.' \
 		'  workbench-down              Stop them; the shared helpers keep running.' \
 		'  workbench-status            What is running.' \
-		'  workbench-build             Build every image locally.'
+		'  workbench-build             Build every image locally.' \
+		'  workbench-pull              Or pull the published images instead.'
 
 claude:
 	@$(WORKBENCH) claude
@@ -57,3 +58,6 @@ workbench-status:
 
 workbench-build:
 	@$(WORKBENCH) build
+
+workbench-pull:
+	@$(WORKBENCH) pull

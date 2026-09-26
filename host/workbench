@@ -5,6 +5,8 @@
 
   Usage:
     host/workbench build            build every image locally (localhost/*:local)
+    host/workbench pull             or take the published ones instead, and tag
+                                    them as the local ones
     host/workbench up [WORKSPACE]   start the helpers, the L2 engine and the
                                     workbenches, one per agent
     host/workbench unlock           add the ssh key to the agent for 8 hours
@@ -67,6 +69,21 @@
   an L2 image of its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/airlock-egress-proxy
   egress-refresh --list` shows every set.
 
+  Settings, from the environment or ${XDG_CONFIG_HOME}/workbench/config
+  (KEY=value lines, read and never run; the environment wins):
+    WORKBENCH_GH_OWNERS   the GitHub owners (users or organizations) the gh
+                          broker may act on, comma separated. Required
+    WORKBENCH_GH_SECRET   the podman secret holding the GitHub token.
+                          Default: gh-devcontainer
+    WORKBENCH_SSH_KEY     the private key the ssh-agent holds, best one made
+                          for this alone. Default: ~/.ssh/devcontainer/id_ed25519
+    WORKBENCH_ROOT        the folder every workspace lives under (above)
+    WORKBENCH_AGENTS      which workbenches `up` starts. Default: claude codex
+    WORKBENCH_TAG         the local image tag. Default: local
+    WORKBENCH_REGISTRY    where `pull` takes images from, with
+                          WORKBENCH_PULL_TAG (default: latest).
+                          Default: ghcr.io/ivan-pinatti-labs
+
   State kept on the host:
     ${XDG_DATA_HOME}/workbench/claude, codex  the agents logins and settings,
         separate from your own ~/.claude and ~/.codex
@@ -84,6 +101,26 @@
 set -o errexit
 set -o nounset
 set -o pipefail
+
+die() { echo "workbench: $*" >&2; exit 1; }
+
+# Settings, from the environment or from this file as KEY=value lines (the
+# environment wins). The file is read, never sourced, so it cannot run
+# anything, and only the names below are accepted.
+CONFIG="${XDG_CONFIG_HOME:-${HOME}/.config}/workbench/config"
+load_config() {
+  local key value
+  [ -f "${CONFIG}" ] || return 0
+  while IFS='=' read -r key value || [ -n "${key}" ]; do
+    case "${key}" in
+      '' | '#'*) continue ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      *) die "unknown setting '${key}' in ${CONFIG}" ;;
+    esac
+    [ -n "${!key:-}" ] || printf -v "${key}" '%s' "${value}"
+  done < "${CONFIG}"
+}
+load_config
 
 TAG="${WORKBENCH_TAG:-local}"
 BASE="localhost/airlock-base:${TAG}"
@@ -109,14 +146,19 @@ DATA="${XDG_DATA_HOME:-${HOME}/.local/share}/workbench"
 RUN="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
 GH_DIR="${RUN}/workbench/gh"
 SSH_DIR="${RUN}/devcontainer-ssh"
-SSH_KEY_DIR="${HOME}/.ssh/devcontainer"
+# The key the ssh-agent holds, the podman secret holding the GitHub token, and
+# the GitHub owners the broker may act on.
+SSH_KEY="${WORKBENCH_SSH_KEY:-${HOME}/.ssh/devcontainer/id_ed25519}"
+GH_SECRET="${WORKBENCH_GH_SECRET:-gh-devcontainer}"
+GH_OWNERS="${WORKBENCH_GH_OWNERS:-}"
+# Where `pull` takes prebuilt images from.
+REGISTRY="${WORKBENCH_REGISTRY:-ghcr.io/ivan-pinatti-labs}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # The folder holding this repository's main clone, even when this script runs
 # from one of its worktrees.
 MAIN="$(dirname "$(git -C "${HERE}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "${HERE}/.git")")"
 ROOT="${WORKBENCH_ROOT:-$(dirname "${MAIN}")}"
 
-die() { echo "workbench: $*" >&2; exit 1; }
 running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
 
 # Two workspaces with the same folder name would map to the same container
@@ -268,6 +310,22 @@ cmd_build() {
   done
 }
 
+# The published images, tagged as the local ones, for anyone who would rather
+# not build them. Prints what each tag resolved to: the published index
+# digest, the one to pin by, rather than this platform's manifest.
+cmd_pull() {
+  local i ref mine index
+  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy; do
+    ref="${REGISTRY}/airlock-${i}:${WORKBENCH_PULL_TAG:-latest}"
+    podman pull --quiet "${ref}" >/dev/null
+    podman tag "${ref}" "localhost/airlock-${i}:${TAG}"
+    mine="$(podman image inspect --format '{{.Digest}}' "${ref}")"
+    index="$(podman image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${ref}" \
+      | grep -F "${REGISTRY}/airlock-${i}@" | grep -vF "${mine}" | head -n1 || true)"
+    echo "workbench: ${i} ${index:-${REGISTRY}/airlock-${i}@${mine}}"
+  done
+}
+
 start_proxy() {
   local ws="$1" name sets
   ensure_net "${ws}"
@@ -296,8 +354,10 @@ start_proxy() {
 
 start_broker() {
   running gh-broker && return
-  podman secret exists gh-devcontainer \
-    || die "no podman secret gh-devcontainer; create it: podman secret create gh-devcontainer <file holding the token>"
+  podman secret exists "${GH_SECRET}" \
+    || die "no podman secret ${GH_SECRET}; create it: podman secret create ${GH_SECRET} <file holding the token>"
+  [ -n "${GH_OWNERS}" ] \
+    || die "set WORKBENCH_GH_OWNERS in ${CONFIG} to the GitHub owners (users or organizations) the broker may act on, comma separated"
   mkdir -p "${GH_DIR}"
   chmod 700 "${RUN}/workbench" "${GH_DIR}"
   podman rm -f gh-broker >/dev/null 2>&1 || true
@@ -307,7 +367,7 @@ start_broker() {
   podman run -d --name gh-broker \
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
     --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
-    --secret gh-devcontainer,type=env,target=GH_TOKEN \
+    --secret "${GH_SECRET},type=env,target=GH_TOKEN" -e GH_BROKER_OWNERS="${GH_OWNERS}" \
     -v "${GH_DIR}:/run/gh-broker:Z" \
     -v "${ROOT}:${ROOT}:ro" \
     "${BROKER_IMAGE}" >/dev/null
@@ -315,8 +375,8 @@ start_broker() {
 
 start_ssh_agent() {
   running devcontainer-ssh-agent && return
-  if [ ! -f "${SSH_KEY_DIR}/id_ed25519" ]; then
-    echo "workbench: no ${SSH_KEY_DIR}/id_ed25519, so no ssh-agent; git push will not work (docs/LAYERS.md)" >&2
+  if [ ! -f "${SSH_KEY}" ]; then
+    echo "workbench: no ${SSH_KEY}, so no ssh-agent; git push will not work (docs/LAYERS.md)" >&2
     return
   fi
   mkdir -p "${SSH_DIR}"
@@ -332,7 +392,7 @@ start_ssh_agent() {
   podman run -d --name devcontainer-ssh-agent \
     --network=none --cap-drop=all --read-only --security-opt no-new-privileges \
     --userns=keep-id "${LABEL_OPTS[@]}" \
-    -v "${SSH_DIR}:/sock:Z" -v "${SSH_KEY_DIR}:/key:ro,Z" \
+    -v "${SSH_DIR}:/sock:Z" -v "${SSH_KEY}:/key/id:ro,Z" \
     --entrypoint ssh-agent "$(wb_image claude)" -D -a /sock/agent.sock >/dev/null
 }
 
@@ -469,7 +529,7 @@ UNIT
 cmd_unlock() {
   running devcontainer-ssh-agent || die "the ssh-agent is not running; host/workbench up first"
   podman exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent \
-    ssh-add -t 8h /key/id_ed25519
+    ssh-add -t 8h /key/id
 }
 
 # Run a command (default: a shell) in agent $1's workbench for workspace $2,
@@ -538,6 +598,7 @@ cmd_down() {
 
 case "${1:-}" in
   build) cmd_build ;;
+  pull) cmd_pull ;;
   up) cmd_up "${2:-}" ;;
   unlock) cmd_unlock ;;
   shell) cmd_shell "${2:-}" "${3:-}" ;;
@@ -549,6 +610,6 @@ case "${1:-}" in
   helpers-down) cmd_helpers_down ;;
   restart-broker) cmd_restart_broker ;;
   install-units) cmd_install_units ;;
-  -h | --help | help) sed -n '3,81p' "$0" ;;
-  *) sed -n '3,32p' "$0" >&2; exit 2 ;;
+  -h | --help | help) sed -n '3,/^    2  usage error$/p' "$0" ;;
+  *) sed -n '3,/run it yourself)$/p' "$0" >&2; exit 2 ;;
 esac

@@ -56,8 +56,17 @@ Once, on the host:
 ```shell
 podman secret create gh-devcontainer /path/to/a/file/holding/the/token
 ssh-keygen -t ed25519 -C devcontainer -f ~/.ssh/devcontainer/id_ed25519
-host/workbench build
+mkdir -p ~/.config/workbench
+echo WORKBENCH_GH_OWNERS=<your user or organization> >> ~/.config/workbench/config
+make workbench-pull      # the published images; or make workbench-build
 ```
+
+`~/.config/workbench/config` holds the settings, one `KEY=value` per line; it
+is read and never run, and an environment variable of the same name wins.
+`WORKBENCH_GH_OWNERS` is the one without a default: the GitHub users or
+organizations whose repositories the broker may act on, comma separated.
+The others (the secret name, the key path, where the workspaces live, which
+agents start) are listed by `host/workbench help`.
 
 The token is a fine grained personal access token for the organization with:
 

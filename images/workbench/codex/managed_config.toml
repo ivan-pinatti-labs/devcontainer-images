@@ -10,7 +10,7 @@ check_for_update_on_startup = false
 # What Claude Code gets from /etc/claude-code/CLAUDE.md, for Codex: where it
 # is running and what that means for the commands it runs.
 developer_instructions = """
-You are running in the ivan-pinatti-labs workbench, a container, not on the
+You are running in a devcontainer-airlock workbench, a container, not on the
 host (docs/LAYERS.md in devcontainer-airlock has the full picture).
 
 - Do not run project code here. Language runtimes, package managers, test

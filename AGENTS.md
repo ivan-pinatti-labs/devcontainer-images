@@ -121,8 +121,11 @@ and identifiers are fine.
 
 ## What this repository is
 
-The container images the other `ivan-pinatti-labs` repositories are developed
-and run inside, split into layers by what each one is trusted with. The
+Secure, layered devcontainers for AI coding agents: a framework any project
+can be developed in, and the one the other `ivan-pinatti-labs` repositories
+are developed in, split into layers by what each one is trusted with.
+Nothing specific to one organization belongs in the images or scripts; it
+goes in the host settings (`host/workbench help`). The
 reference is docs/LAYERS.md; docs/IMAGES.md covers how the images are built
 and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 
