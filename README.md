@@ -32,14 +32,16 @@ build works.
 ## Usage
 
 ```shell
-host/workbench build    # every image, locally
-host/workbench up       # helpers, L2 engine and workbench for this repository
-host/workbench unlock   # the ssh key, for eight hours
-host/workbench shell    # a terminal in the workbench
+make workbench-build    # every image, locally
+make unlock             # the ssh key, for eight hours
+make claude             # Claude Code in its workbench, started if needed (or: codex)
+make claude-shell       # a terminal in that workbench (or: codex-shell)
 ```
 
-Or attach VS Code to the running `workbench-<folder>` container. Published
-images are consumed by digest rather than by a floating tag, so a rebuild
+Or attach VS Code to the running `workbench-claude-<folder>` or
+`workbench-codex-<folder>` container, whichever agent's extension you want;
+each agent has a workbench of its own and cannot read the other's login.
+Published images are consumed by digest rather than by a floating tag, so a rebuild
 cannot change what a repository builds against until someone bumps the pin.
 
 ## How images are built

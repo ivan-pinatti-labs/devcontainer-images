@@ -6,10 +6,14 @@
   Usage:
     host/workbench build            build every image locally (localhost/*:local)
     host/workbench up [WORKSPACE]   start the helpers, the L2 engine and the
-                                    workbench
+                                    workbenches, one per agent
     host/workbench unlock           add the ssh key to the agent for 8 hours
-    host/workbench shell [WORKSPACE]
-                                    a shell in the running workbench
+    host/workbench claude [WORKSPACE]
+    host/workbench codex [WORKSPACE]
+                                    that agent, in its workbench, in the
+                                    folder you are in
+    host/workbench shell claude|codex [WORKSPACE]
+                                    a shell in that agent workbench
     host/workbench load-l2 [WORKSPACE]
                                     copy the local L2 images into the L2 engine
                                     now (up does it when they differ)
@@ -26,6 +30,13 @@
     host/workbench install-units    install a systemd user unit that starts
                                     the helpers at login (changes your
                                     ~/.config/systemd/user; run it yourself)
+
+  Each agent has a workbench of its own (workbench-claude-<name>,
+  workbench-codex-<name>), holding its own login and not the other one, so
+  neither agent can read the other credentials. Both share the workspace L2
+  engine, egress proxy and helpers. WORKBENCH_AGENTS limits which start
+  (default: claude codex). For the editor, attach VS Code to the one whose
+  agent extension you want; its title bar says which it is.
 
   WORKSPACE is the folder mounted into the workbench and the L2 engine, at its
   own path. Default: the main clone of the git repository you are in (so its
@@ -76,7 +87,11 @@ set -o pipefail
 
 TAG="${WORKBENCH_TAG:-local}"
 BASE="localhost/devcontainer-base:${TAG}"
-WB_IMAGE="localhost/devcontainer-workbench:${TAG}"
+# One workbench image per agent, built from the same Dockerfile.
+wb_image() { echo "localhost/devcontainer-workbench-$1:${TAG}"; }
+# Every agent there is a workbench for, and the ones `up` starts.
+KNOWN_AGENTS="claude codex"
+AGENTS="${WORKBENCH_AGENTS:-${KNOWN_AGENTS}}"
 L2_IMAGE="localhost/devcontainer-l2:${TAG}"
 ENGINE_IMAGE="localhost/devcontainer-l2-engine:${TAG}"
 BROKER_IMAGE="localhost/devcontainer-gh-broker:${TAG}"
@@ -137,7 +152,8 @@ slug() {
   esac
   printf '%s\n' "${name}" | tr -c 'A-Za-z0-9_.\n-' _
 }
-wb_name() { echo "workbench-$(slug "$1")"; }
+# The workbench of agent $2 for workspace $1.
+wb_name() { echo "workbench-$2-$(slug "$1")"; }
 engine_name() { echo "l2-engine-$(slug "$1")"; }
 engine_dir() { echo "${RUN}/workbench/$(slug "$1")"; }
 net_name() { echo "workbench-net-$(slug "$1")"; }
@@ -240,8 +256,14 @@ profiles() {
 }
 
 cmd_build() {
+  local i
   podman build -t "${BASE}" "${HERE}/images/base"
-  for i in workbench l2 l2-engine gh-broker egress-proxy; do
+  # Both workbenches from one Dockerfile; the second reuses every layer the
+  # first built below its agent stage.
+  for i in claude codex; do
+    podman build --build-arg "BASE_IMAGE=${BASE}" --target "${i}" -t "$(wb_image "${i}")" "${HERE}/images/workbench"
+  done
+  for i in l2 l2-engine gh-broker egress-proxy; do
     podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/devcontainer-${i}:${TAG}" "${HERE}/images/${i}"
   done
 }
@@ -311,7 +333,7 @@ start_ssh_agent() {
     --network=none --cap-drop=all --read-only --security-opt no-new-privileges \
     --userns=keep-id "${LABEL_OPTS[@]}" \
     -v "${SSH_DIR}:/sock:Z" -v "${SSH_KEY_DIR}:/key:ro,Z" \
-    --entrypoint ssh-agent "${WB_IMAGE}" -D -a /sock/agent.sock >/dev/null
+    --entrypoint ssh-agent "$(wb_image claude)" -D -a /sock/agent.sock >/dev/null
 }
 
 start_engine() {
@@ -351,17 +373,19 @@ start_engine() {
   die "the L2 engine did not open its socket; podman logs ${name}"
 }
 
+# The workbench of one agent. It mounts that agent's state folder and not the
+# other's.
 start_workbench() {
-  local ws="$1" name gitdir=()
-  name="$(wb_name "${ws}")"
+  local ws="$1" agent="$2" name gitdir=()
+  name="$(wb_name "${ws}" "${agent}")"
   check_owner "${name}" workbench.workspace "${ws}"
   running "${name}" && return
-  mkdir -p "${DATA}/claude" "${DATA}/codex"
+  mkdir -p "${DATA}/${agent}"
   set_proxy_env "${ws}"
   mapfile -t gitdir < <(git_dir_mount "${ws}")
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
-    --label workbench.workspace="${ws}" \
+    --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
     --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
     -e GIT_AUTHOR_NAME="$(git config --get user.name || true)" -e GIT_AUTHOR_EMAIL="$(git config --get user.email || true)" \
@@ -369,17 +393,16 @@ start_workbench() {
     -e SSH_AUTH_SOCK=/run/devcontainer-ssh/agent.sock \
     -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
     -v "${ws}:${ws}:Z" "${gitdir[@]}" \
-    -v "${DATA}/claude:/home/dev/.claude:Z" \
-    -v "${DATA}/codex:/home/dev/.codex:Z" \
+    -v "${DATA}/${agent}:/home/dev/.${agent}:Z" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
     -w "${ws}" \
-    --entrypoint catatonit "${WB_IMAGE}" -- workbench-init >/dev/null
+    --entrypoint catatonit "$(wb_image "${agent}")" -- workbench-init >/dev/null
 }
 
 cmd_up() {
-  local ws
+  local ws agent
   ws="$(workspace "${1:-}")"
   profiles "${ws}" >/dev/null
   case "${ws}/" in
@@ -390,9 +413,11 @@ cmd_up() {
   start_proxy "${ws}"
   start_engine "${ws}"
   sync_l2 "${ws}"
-  start_workbench "${ws}"
-  echo "workbench: up for ${ws} ($(wb_name "${ws}"), $(engine_name "${ws}"))"
-  echo "workbench: terminal: host/workbench shell; editor: Attach to Running Container, $(wb_name "${ws}")"
+  for agent in ${AGENTS}; do
+    start_workbench "${ws}" "${agent}"
+    echo "workbench: ${agent}: host/workbench ${agent}, or attach VS Code to $(wb_name "${ws}" "${agent}")"
+  done
+  echo "workbench: up for ${ws} (L2 engine $(engine_name "${ws}"))"
 }
 
 start_helpers() {
@@ -447,14 +472,26 @@ cmd_unlock() {
     ssh-add -t 8h /key/id_ed25519
 }
 
+# Run a command (default: a shell) in agent $1's workbench for workspace $2,
+# in the folder you are in when it is inside the workspace.
 cmd_shell() {
-  local ws name cwd
-  ws="$(workspace "${1:-}")"
-  name="$(wb_name "${ws}")"
-  running "${name}" || cmd_up "${ws}" >/dev/null
+  local agent="${1:-}" ws name cwd
+  case " ${KNOWN_AGENTS} " in
+    *" ${agent:-none} "*) ;;
+    *) echo "workbench: which agent? host/workbench shell claude|codex [WORKSPACE]" >&2; exit 2 ;;
+  esac
+  ws="$(workspace "${2:-}")"
+  shift 2 2>/dev/null || shift $#
+  name="$(wb_name "${ws}" "${agent}")"
+  # An agent asked for by name starts even when WORKBENCH_AGENTS leaves it
+  # out of `up`.
+  if ! running "${name}"; then
+    cmd_up "${ws}" >/dev/null
+    running "${name}" || start_workbench "${ws}" "${agent}"
+  fi
   cwd="${PWD}"
   case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
-  exec podman exec -it -w "${cwd}" "${name}" bash
+  exec podman exec -it -w "${cwd}" "${name}" "${@:-bash}"
 }
 
 cmd_load_l2() {
@@ -491,7 +528,9 @@ cmd_status() {
 cmd_down() {
   local ws
   ws="$(workspace "${1:-}")"
-  podman rm -f -t 5 "$(wb_name "${ws}")" "$(engine_name "${ws}")" "$(proxy_name "${ws}")" \
+  # workbench-<name> is the single workbench from before the split.
+  podman rm -f -t 5 "$(wb_name "${ws}" claude)" "$(wb_name "${ws}" codex)" \
+    "workbench-$(slug "${ws}")" "$(engine_name "${ws}")" "$(proxy_name "${ws}")" \
     >/dev/null 2>&1 || true
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   echo "workbench: down"
@@ -501,7 +540,8 @@ case "${1:-}" in
   build) cmd_build ;;
   up) cmd_up "${2:-}" ;;
   unlock) cmd_unlock ;;
-  shell) cmd_shell "${2:-}" ;;
+  shell) cmd_shell "${2:-}" "${3:-}" ;;
+  claude | codex) cmd_shell "$1" "${2:-}" "$1" ;;
   load-l2) cmd_load_l2 "${2:-}" ;;
   status) cmd_status ;;
   down) cmd_down "${2:-}" ;;
@@ -509,6 +549,6 @@ case "${1:-}" in
   helpers-down) cmd_helpers_down ;;
   restart-broker) cmd_restart_broker ;;
   install-units) cmd_install_units ;;
-  -h | --help | help) sed -n '3,55p' "$0" ;;
-  *) sed -n '3,20p' "$0" >&2; exit 2 ;;
+  -h | --help | help) sed -n '3,81p' "$0" ;;
+  *) sed -n '3,32p' "$0" >&2; exit 2 ;;
 esac

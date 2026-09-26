@@ -129,7 +129,7 @@ and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 | Image | Directory | Role |
 | --- | --- | --- |
 | base | `images/base/` | the floor: git, common tools, trusted apt keys, the dev account |
-| workbench | `images/workbench/` | the agents, the editor's extensions, git; no GitHub token, no ssh key, no container runtime |
+| workbench-claude, workbench-codex | `images/workbench/` | one per agent: that agent, its editor extension, git; no GitHub token, no ssh key, no container runtime, no other agent's login |
 | l2 | `images/l2/` | where hooks, tests and installs run; no network, no credentials |
 | l2-engine | `images/l2-engine/` | the rootless podman that starts L2 containers |
 | gh-broker | `images/gh-broker/` | holds the GitHub token; runs allowlisted gh commands |

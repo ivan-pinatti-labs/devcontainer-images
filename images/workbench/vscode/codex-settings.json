@@ -1,0 +1,9 @@
+{
+  "window.title": "Codex workbench: ${rootName}${separator}${activeEditorShort}",
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#1f5f4a",
+    "titleBar.activeForeground": "#ffffff",
+    "statusBar.background": "#1f5f4a",
+    "statusBar.foreground": "#ffffff"
+  }
+}

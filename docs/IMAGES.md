@@ -9,7 +9,8 @@ with, and why they are split this way, is in [LAYERS.md](LAYERS.md).
 | Image | Built on | Carries |
 | --- | --- | --- |
 | `base` | Ubuntu, by digest | git, curl, jq, python3, procps, the trusted apt keys, the dev account |
-| `workbench` | base | Claude Code and Codex, the pinned VS Code extensions, `l2`, the `gh` shim, the agents' managed policy, a podman client |
+| `workbench-claude` | base | Claude Code, its VS Code extension and the shared ones, its managed policy, `l2`, the `gh` shim, a podman client |
+| `workbench-codex` | base | the same for Codex; both are targets of `images/workbench/Dockerfile` and share every layer below the agent's own |
 | `l2` | base | pre-commit, node, go, shellcheck, the baked linters, a podman client for `--engine` runs |
 | `l2-engine` | base | rootless podman serving a socket (the nested runtime below) |
 | `gh-broker` | base | gh and the broker |

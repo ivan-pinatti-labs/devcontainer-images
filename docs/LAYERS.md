@@ -23,9 +23,10 @@ host         podman, the VS Code desktop, podman secrets. Nothing else runs here
  ├─ ssh-agent        holds the ssh key; the key never leaves it
  ├─ gh-broker        holds the GitHub token; runs allowlisted gh commands
  ├─ egress-proxy     one per workspace: the only way out, by egress sets
- ├─ workbench        you, the coding agents, the editor's extensions, git
- │                   no GitHub token, no ssh key, no direct network,
- │                   no container runtime
+ ├─ workbench-claude you, Claude Code, its editor extension, git
+ ├─ workbench-codex  you, Codex, its editor extension, git
+ │                   each: no GitHub token, no ssh key, no direct network,
+ │                   no container runtime, no other agent's login
  └─ L2 engine        starts L2 containers; the workspace, nothing else
        └─ L2         hooks, tests, installs, throwaway binaries
                      no network, no credentials, only the working tree
@@ -37,7 +38,7 @@ host         podman, the VS Code desktop, podman secrets. Nothing else runs here
 | ssh-agent | `ssh-agent` | nothing: no network, read only, no capabilities |
 | gh-broker | `gh` with the token | GitHub, for the commands in its allowlist |
 | egress-proxy | squid, one per workspace | the domains of its workspace's egress sets |
-| workbench | Claude Code, Codex, the VS Code server and its extensions, git | the proxy, the broker socket, the agent socket, the engine socket, the workspace |
+| workbench (one per agent) | that agent, the VS Code server and that agent's extensions, git | the proxy, the broker socket, the agent socket, the engine socket, the workspace, that agent's own login |
 | L2 engine | rootless podman | the proxy, the workspace |
 | L2 | pre-commit hooks, tests, package installs, anything the agents run that executes project code | the working tree, and the proxy only when a run asks for network |
 
@@ -77,14 +78,41 @@ key's public half is added to your GitHub account as an authentication key.
 Each day, from the repository you are working on:
 
 ```shell
-host/workbench up        # proxy, broker, ssh-agent, L2 engine (with the current L2 image), workbench
-host/workbench unlock    # type the key's passphrase; lasts 8 hours
-host/workbench shell     # a terminal in the workbench
+make unlock              # type the key's passphrase; lasts 8 hours
+make claude              # Claude Code, in its workbench, in the folder you are in
+make codex               # the same for Codex
+make claude-shell        # or codex-shell: a plain terminal in that workbench
 ```
 
-For the editor, attach VS Code to the running `workbench-<folder>` container
-(**Dev Containers: Attach to Running Container**). The terminal and the editor
-are two views of the same container.
+`make` alone lists the targets, and Tab completes them. They come from
+`host/workbench.mk`, which each repository's Makefile includes, and call
+`host/workbench` (`host/workbench help` has every command). `make claude` and
+`make codex` start the workspace (proxy, broker, ssh-agent, L2 engine with
+the current L2 image, both workbenches) when it is not running;
+`make workbench-up` starts it on its own.
+
+### One workbench per agent
+
+Each agent has a workbench of its own, `workbench-claude-<folder>` and
+`workbench-codex-<folder>`, and each mounts only that agent's login folder.
+So neither agent can read the other's credentials, which a shared workbench
+allowed (Claude Code's managed settings could only ask it not to read
+Codex's). Both workbenches share the workspace, its L2 engine, its egress
+proxy and the helpers, so they work on the same files and the same pull
+requests. `WORKBENCH_AGENTS=claude host/workbench up` starts one only.
+
+The two images are targets of one Dockerfile. Everything below the agent's
+own layer is built once and stored once, and the agent layer holds only that
+agent's CLI, its managed policy and its editor extensions (measured
+2026-09-26: 545 MB shared, 486 MB of Claude's own, 1.0 GB of Codex's, most of
+it the Codex extension).
+
+For the editor, attach VS Code to the workbench of the agent whose extension
+you want (**Dev Containers: Attach to Running Container**). Each image
+carries only its own agent's extension, and its machine settings title the
+window "Claude workbench" or "Codex workbench" and color the title and
+status bars (rust for Claude, green for Codex), so the window says which one
+it is. The terminal and the editor are two views of the same container.
 
 Copy and paste in the terminal work through the terminal itself: Ctrl+Shift+V
 pastes in, and in a full screen program such as Claude Code, hold Shift while
@@ -93,7 +121,7 @@ host's clipboard on purpose, since anything running in it could then read
 whatever was last copied on the host; Claude Code's `/copy` therefore works
 only in a terminal that honours the OSC 52 escape sequence.
 
-The first time in a repository, inside the workbench:
+The first time in a repository, inside either workbench:
 
 ```shell
 l2-hooks-install         # git hooks that run pre-commit in L2
@@ -101,9 +129,10 @@ l2-hooks-install         # git hooks that run pre-commit in L2
 
 Then `git commit` and `git push` work as they always have. Hooks that were
 installed before are kept as `<hook>.pre-l2` and still run when a commit is
-made from outside the workbench. Log the agents in once (`claude`, `codex`);
-their logins live in `~/.local/share/workbench/`, not in your own `~/.claude`
-or `~/.codex`.
+made from outside the workbench. Log each agent in once in its own
+workbench (`host/workbench claude`, `host/workbench codex`); their logins
+live in `~/.local/share/workbench/claude` and `.../codex`, not in your own
+`~/.claude` or `~/.codex`.
 
 ### Per repository
 

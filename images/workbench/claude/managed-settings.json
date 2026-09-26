@@ -15,10 +15,7 @@
   },
   "permissions": {
     "ask": ["Bash(podman:*)", "Bash(l2 --image:*)"],
-    "deny": [
-      "Read(/home/dev/.claude/.credentials.json)",
-      "Read(/home/dev/.codex/auth.json)"
-    ]
+    "deny": ["Read(/home/dev/.claude/.credentials.json)"]
   },
   "sandbox": {
     "enabled": true,
