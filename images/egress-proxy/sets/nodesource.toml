@@ -1,0 +1,2 @@
+description = "NodeSource's apt repository, for building images that carry Node.js."
+domains = ["deb.nodesource.com"]

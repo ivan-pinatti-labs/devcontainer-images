@@ -122,41 +122,54 @@ and identifiers are fine.
 ## What this repository is
 
 The container images the other `ivan-pinatti-labs` repositories are developed
-and run inside. One shared base image carries the tooling common to all of
-them; a repository needing more adds a thin layer on top of it.
+and run inside, split into layers by what each one is trusted with. The
+reference is docs/LAYERS.md; docs/IMAGES.md covers how the images are built
+and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 
-`images/base/` is the shared base image; docs/IMAGES.md is the reference for
-what it carries, how a repository consumes it, and how the build works.
+| Image | Directory | Role |
+| --- | --- | --- |
+| base | `images/base/` | the floor: git, common tools, trusted apt keys, the dev account |
+| workbench | `images/workbench/` | the agents, the editor's extensions, git; no GitHub token, no ssh key, no container runtime |
+| l2 | `images/l2/` | where hooks, tests and installs run; no network, no credentials |
+| l2-engine | `images/l2-engine/` | the rootless podman that starts L2 containers |
+| gh-broker | `images/gh-broker/` | holds the GitHub token; runs allowlisted gh commands |
+| egress-proxy | `images/egress-proxy/` | one per workspace, the only way out to the network, by egress sets |
 
+`host/workbench` starts them; it runs on the host and does nothing there but
+call podman.
+
+- Keep each layer to its role. Credentials go nowhere but the broker and
+  the ssh-agent; project code runs nowhere but L2; the workbench carries
+  nothing that executes project code. A change that moves one of those lines
+  needs saying out loud in the pull request, with the measurement behind it.
+- Widening an allowlist (an egress set or a new one, gh commands,
+  extensions, workbench profiles) is a reviewed change of its own, never folded into something
+  else. Extensions are pinned to a version at least seven days old.
+- Files the agents are held to (`images/workbench/claude/`,
+  `images/workbench/codex/`, `images/workbench/bin/route-to-l2`) are policy,
+  not a boundary; docs/LAYERS.md says what is. Do not describe them as more.
 - An image is consumed by digest, never by a floating tag, so a rebuild
   cannot change what a repository builds against without a commit saying so.
 - Every published image is linted (hadolint, through the pre-commit hooks)
   and scanned, and ships an SBOM and build provenance. A secret found in a
   layer blocks the publish. Vulnerabilities are reported rather than
   blocking, except a critical one with a fix available, which blocks.
-- The base image carries only what every repository needs. A tool one
-  repository needs is installed with apt in a layer on top, not here. This
-  image carries the apt signing keys for that, and enables none of those
+- The base image carries only what every image needs. A tool one layer or
+  one repository needs is installed with apt in that layer, not here. The
+  base carries the apt signing keys for that and enables none of those
   repositories itself: see `docs/TOOL_SOURCES.md`. There is no version
-  manager in the image and no `.tool-versions` anywhere in the
-  organization. Rootless Podman is in the base because nearly every
-  repository's hooks start containers, and it stays inert until a repository
-  opts in to nesting (docs/IMAGES.md, "Running containers inside it").
-- Nesting is opt in per repository, never a default of the image: the
-  `--security-opt label=type:container_engine_t --device /dev/fuse` flags go
-  in that repository's own devcontainer.json, and its documentation says
-  which of its tools needs them. SELinux stays enforcing: never reach for
-  `label=disable` to make nesting work, and never loosen the
-  crun-without-masked-paths wrapper beyond removing masked paths.
-- A nested network of its own (`--device /dev/net/tun`,
-  `--security-opt unmask=/proc/sys` and the bridge network override) and
-  devices passed on to nested containers (the host policy module under
-  `host/selinux/`) are further opt ins, for the repositories whose tooling
-  needs them, never defaults. Keep the module to the `mounton` permission it
+  manager anywhere in the organization.
+- SELinux stays enforcing. Never reach for `label=disable`, and never loosen
+  the crun-without-masked-paths wrapper beyond removing masked paths. The
+  containers that talk over sockets share the `container_engine_t` domain
+  and one category, because a different one cannot connect.
+- Devices passed on to containers the engine starts (the host policy module
+  under `host/selinux/`) are an opt in for the repositories whose tests need
+  them, never a default. Keep the module to the `mounton` permission it
   grants today, and never suggest the `container_use_devices` boolean
   instead: it widens every container domain on the machine.
-- Rebuilds on a schedule pick up upstream security fixes. They publish a new
-  digest and cut no release, so nothing consumes them until a repository
+- Rebuilds on a schedule pick up upstream security fixes. They publish new
+  digests and cut no release, so nothing consumes them until a repository
   bumps its pin.
 - The images are built and run with rootless Podman. Anything that assumes a
   daemon, a privileged container or a Docker socket needs saying out loud in

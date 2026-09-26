@@ -7,45 +7,50 @@
 [![GitHub forks](https://img.shields.io/github/forks/ivan-pinatti-labs/devcontainer-images?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-images/forks)
 [![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/ivan-pinatti-labs/devcontainer-images?utm_source=oss&utm_medium=github&utm_campaign=ivan-pinatti-labs%2Fdevcontainer-images&labelColor=171717&color=FF570A&label=CodeRabbit+Reviews&style=for-the-badge)](https://coderabbit.ai)
 
-Container images for developing and running the `ivan-pinatti-labs`
-repositories. One shared base image carries the tooling common to all of
-them, and a repository needing more adds a thin layer on top of it. The point
-is that work on those repositories happens inside a container holding exactly
-what it needs, rather than on the host.
+Container images for developing the `ivan-pinatti-labs` repositories, split
+into layers by what each one is trusted with. You and the coding agents work
+in a workbench that holds no GitHub token and no ssh key; hooks, tests and
+package installs run in L2 containers with no network and no credentials; a
+GitHub broker, an ssh-agent and an egress proxy sit beside them, and nothing
+runs on the host but podman. [docs/LAYERS.md](docs/LAYERS.md) explains the
+layers and the daily routine.
 
 ## Status
 
-The base image and its pipeline are here; the first publish happens when
-this lands on `main`. [docs/IMAGES.md](docs/IMAGES.md) is the reference for
-what the image carries, how a repository consumes it and what the build
-checks.
+The layered images are new and not published yet. The base image published
+today is the previous, single container design;
+[docs/IMAGES.md](docs/IMAGES.md) covers what each image carries and how the
+build works.
 
 ## Requirements
 
 - [Podman](https://podman.io/), rootless. It is the runtime these images are
-  built and run with. Docker is compatible, but nothing here assumes a daemon
-  or a mounted socket.
-- [`pre-commit`](https://pre-commit.com/#install) and `git` for the local
-  checks, which are the same ones CI runs.
+  built and run with. Nothing here assumes a daemon or a mounted socket.
+- An SELinux enforcing host is what this was built and measured on. Nothing
+  here turns labelling off.
 
 ## Usage
 
-Images will be published to the GitHub Container Registry and consumed by
-digest rather than by a floating tag, so a rebuild cannot change what a
-repository builds against until someone bumps the pin:
-
-```dockerfile
-FROM ghcr.io/ivan-pinatti-labs/devcontainer-base@sha256:<digest>
+```shell
+host/workbench build    # every image, locally
+host/workbench up       # helpers, L2 engine and workbench for this repository
+host/workbench unlock   # the ssh key, for eight hours
+host/workbench shell    # a terminal in the workbench
 ```
+
+Or attach VS Code to the running `workbench-<folder>` container. Published
+images are consumed by digest rather than by a floating tag, so a rebuild
+cannot change what a repository builds against until someone bumps the pin.
 
 ## How images are built
 
-Every published image is linted with hadolint, scanned for secrets and
-vulnerabilities, and ships a software bill of materials and build provenance.
-A secret found in a layer blocks the publish. Vulnerabilities are reported
-rather than blocking, with one exception: a critical one carrying a fix
-blocks. Scheduled rebuilds pick up upstream security fixes and publish a new
-digest without cutting a release.
+`scripts/build-images.sh`, in CI and locally alike: base first, then every
+other image on that exact base, each scanned before anything is published,
+and what is published is the scanned manifest itself. A secret found in a
+layer blocks the publish. Vulnerabilities are reported rather than blocking,
+with one exception: a critical one carrying a fix blocks. Scheduled rebuilds
+pick up upstream security fixes and publish new digests without cutting a
+release.
 
 ## License
 

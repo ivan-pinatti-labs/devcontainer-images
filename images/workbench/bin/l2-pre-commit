@@ -1,0 +1,40 @@
+#!/bin/sh
+: '
+  pre-commit, run in L2. Used by the git hooks l2-hooks-install writes, and by
+  the coding agents (their `pre-commit ...` commands are routed here).
+
+  Usage:
+    l2-pre-commit ARGS...      the same arguments pre-commit takes
+
+  Hooks may write the paths the workbench or the host execute (formatters open
+  files for writing even when they change nothing), so those are writable for
+  the run; l2 compares them with before, as it does after every run, and a run
+  in which a hook actually changed one fails, naming the files.
+
+  A repository whose hooks build or start containers of their own lists
+  hooks-engine in .devcontainer/workbench-profile, and its runs get the L2
+  engine (l2 --engine).
+
+  Hooks that can only work with the open internet (link checkers) are skipped
+  here and left to CI: L2 runs hooks with no network. L2_SKIP_HOOKS overrides
+  the list; SKIP adds to it, as with pre-commit itself.
+
+  Exit status codes:
+    3    a hook changed a protected path (reported by l2)
+    any  otherwise, the exit status of pre-commit
+'
+set -eu
+
+skip="${L2_SKIP_HOOKS-markdown-link-check,lychee}"
+[ -n "${SKIP:-}" ] && skip="${skip:+${skip},}${SKIP}"
+
+cd "$(git rev-parse --show-toplevel)"
+engine=""
+if [ -f .devcontainer/workbench-profile ] && grep -qx hooks-engine .devcontainer/workbench-profile; then
+  engine="--engine"
+fi
+# The protected path check is l2's own, on every run; here it only has to
+# leave those paths writable, since formatters open files for writing even
+# when they change nothing.
+# shellcheck disable=SC2086 # ${engine} is one flag or nothing
+exec l2 ${engine} --protected-rw --env "SKIP=${skip}" -- pre-commit "$@"

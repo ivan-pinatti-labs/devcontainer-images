@@ -1,0 +1,8 @@
+{
+  "extensions.autoUpdate": false,
+  "extensions.autoCheckUpdates": false,
+  "extensions.verifySignature": true,
+  "extensions.ignoreRecommendations": true,
+  "http.proxySupport": "override",
+  "telemetry.telemetryLevel": "off"
+}

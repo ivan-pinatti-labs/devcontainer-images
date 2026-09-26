@@ -1,0 +1,18 @@
+# Admin enforced Codex configuration for the workbench, read from
+# /etc/codex/requirements.toml. Codex falls back to a compatible value, and
+# says so, when a local setting conflicts with these.
+
+# Never run without asking and never drop Codex's own sandbox.
+allowed_approval_policies = ["on-request", "untrusted"]
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+
+# The same routing policy Claude Code gets, in its refusing form: Codex does
+# not take a rewritten command from a hook, so it is told the `l2` command
+# line to use instead.
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/usr/local/libexec/workbench/route-to-l2 --deny"
+timeout = 10

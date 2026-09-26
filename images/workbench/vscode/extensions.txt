@@ -1,0 +1,12 @@
+# The VS Code extensions baked into the workbench, one per line, pinned to an
+# exact version. Nothing else can be installed at run time: the extensions
+# directory is read only, auto update is off, and adding one means changing
+# this file in a reviewed pull request.
+#
+# A pin is chosen at least seven days after its release, the same rule the
+# coding agent CLIs follow, because a malicious update to a trusted extension
+# is usually found and pulled within days (docs/LAYERS.md, "Extensions").
+anthropic.claude-code@2.1.274
+openai.chatgpt@26.908.40401
+ms-vscode.makefile-tools@0.12.17
+vscode-icons-team.vscode-icons@12.19.0

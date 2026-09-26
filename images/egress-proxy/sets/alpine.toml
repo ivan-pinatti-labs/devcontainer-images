@@ -1,0 +1,2 @@
+description = "Alpine's package CDN, for building Alpine based images."
+domains = ["dl-cdn.alpinelinux.org"]

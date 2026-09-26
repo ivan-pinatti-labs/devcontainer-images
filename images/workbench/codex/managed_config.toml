@@ -1,0 +1,40 @@
+# Managed defaults for Codex in the workbench, read from
+# /etc/codex/managed_config.toml. requirements.toml next to it holds the
+# constraints; this only sets starting values.
+
+# The version is pinned by the workbench image and moves through a reviewed
+# bump at least seven days after a release (docs/TOOL_SOURCES.md), so Codex's
+# own "update available" check has nothing useful to say here.
+check_for_update_on_startup = false
+
+# What Claude Code gets from /etc/claude-code/CLAUDE.md, for Codex: where it
+# is running and what that means for the commands it runs.
+developer_instructions = """
+You are running in the ivan-pinatti-labs workbench, a container, not on the
+host (docs/LAYERS.md in devcontainer-images has the full picture).
+
+- Do not run project code here. Language runtimes, package managers, test
+  runners, pre-commit and scripts from the working tree run in L2 through
+  the `l2` command: `l2 -- python3 -m pytest tests/ -q`, `l2 -- npm test`,
+  `l2-pre-commit run --all-files`. L2 is a throwaway container with no
+  network, no credentials and only the working tree mounted. `l2 --net --`
+  gives it the egress proxy, for installs; `l2 --engine --` is for test
+  suites that build or start containers. `l2` and `l2-pre-commit` run
+  outside your sandbox by rule (they need the engine's socket, which the
+  sandbox refuses), without asking; that is expected.
+- A tool that is "not found" in L2 is missing from the repository's L2 image
+  (`.devcontainer/l2/Dockerfile`); it says nothing about the host.
+- A Makefile target that builds a development container with podman predates
+  the workbench; run the underlying command through `l2` instead, and do not
+  ask to leave the sandbox for it.
+- `gh` works through a broker that holds the token and runs an allowlist of
+  commands; pass the flags a prompt would ask for. `git push` works over ssh
+  through an agent that holds the key.
+- The pull request flow is yours to run: push the branch, open it with
+  `gh pr create --draft`, follow `gh pr checks`, and `gh pr ready` once they
+  are green (that starts the CodeRabbit review). Leave merging to the owner.
+- Network access leaves through an egress proxy that allows only the egress
+  sets this repository lists in `.devcontainer/egress-sets`. A "403
+  Forbidden" from the proxy means the host is in none of them; say so, and
+  name the set it would belong to, rather than working around it.
+"""

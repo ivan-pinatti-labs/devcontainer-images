@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Turn the selected egress sets into squid's access rules.
+
+Each set is a TOML file in /etc/egress/sets: a description, the domains it
+allows (`example.com` for that name alone, `*.example.com` for the name and
+every name under it), and optionally a provider whose published list is
+fetched here, so the set does not go stale:
+
+  github-meta     api.github.com/meta: GitHub's address ranges (`ip_keys`
+                  picks which), and its domains (`domain_categories`)
+  aws-ip-ranges   ip-ranges.amazonaws.com: AWS's address ranges, filtered by
+                  `services` and optionally `regions`
+
+A provider's ranges are enforced when the set says `enforce_ips = true`: a
+request is allowed only when its name is on the set's list and the address
+it resolves to is inside those ranges.
+
+A fetch that fails falls back to the last good copy in the cache, and with
+none, the set keeps its static domains and drops the address check, saying so
+loudly. Availability wins there on purpose: a provider's API being down for
+an hour should not stop anyone working, and the domain list still holds.
+
+Usage:
+  egress-refresh [--list]
+
+Environment:
+  EGRESS_SETS   comma separated set names; "workbench", "github" and
+                "ghcr" are always included
+  EGRESS_OUT    where squid's generated rules go (default /run/egress)
+  EGRESS_CACHE  where provider data is kept between runs (default
+                /var/lib/egress)
+
+Exit status codes:
+  0  rules written
+  2  an unknown set name, or a set file that cannot be read
+"""
+import datetime
+import ipaddress
+import json
+import os
+import pathlib
+import sys
+import tomllib
+import urllib.request
+
+SETS_DIR = pathlib.Path("/etc/egress/sets")
+OUT = pathlib.Path(os.environ.get("EGRESS_OUT", "/run/egress"))
+CACHE = pathlib.Path(os.environ.get("EGRESS_CACHE", "/var/lib/egress"))
+ALWAYS = ["workbench", "github", "ghcr"]
+
+
+def log(msg):
+    print(f"egress-refresh: {msg}", file=sys.stderr, flush=True)
+
+
+def fetch_json(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "egress-refresh"})
+    # S310: every URL here is a constant https address from a provider below.
+    with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
+        return json.load(r)
+
+
+def github_meta(opts):
+    meta = fetch_json("https://api.github.com/meta")
+    ips = [p for k in opts.get("ip_keys", []) for p in meta.get(k, [])]
+    domains = [d for c in opts.get("domain_categories", []) for d in meta.get("domains", {}).get(c, [])]
+    return domains, ips
+
+
+def aws_ip_ranges(opts):
+    data = fetch_json("https://ip-ranges.amazonaws.com/ip-ranges.json")
+    services = set(opts.get("services", ["AMAZON"]))
+    regions = set(opts.get("regions", []))
+    ips = []
+    for key, field in (("prefixes", "ip_prefix"), ("ipv6_prefixes", "ipv6_prefix")):
+        for p in data.get(key, []):
+            if p.get("service") in services and (not regions or p.get("region") in regions):
+                ips.append(p[field])
+    return [], ips
+
+
+PROVIDERS = {"github-meta": github_meta, "aws-ip-ranges": aws_ip_ranges}
+
+
+def collapse(ranges):
+    """Merge overlapping and adjacent ranges. Providers publish many that
+    overlap (AWS: over 9000 entries), and squid warns about each overlap,
+    enough warnings to abort its start."""
+    nets = [ipaddress.ip_network(r, strict=False) for r in ranges]
+    out = []
+    for version in (4, 6):
+        out += [str(n) for n in ipaddress.collapse_addresses(n for n in nets if n.version == version)]
+    return out
+
+
+def provider_data(set_name, provider):
+    """Fresh data if the provider answers, else the last good copy, else nothing."""
+    cache = CACHE / f"{set_name}.json"
+    try:
+        domains, raw = PROVIDERS[provider["name"]](provider)
+        ips = collapse(raw)
+        if provider.get("enforce_ips") and not ips:
+            raise ValueError("the provider returned no address ranges")
+    except (OSError, ValueError, KeyError) as e:
+        if cache.exists():
+            record = json.loads(cache.read_text())
+            log(f"{set_name}: {provider['name']} failed ({e}); using the copy from {record['fetched']}")
+            return record["domains"], record["ips"]
+        log(f"WARNING {set_name}: {provider['name']} failed ({e}) and nothing is cached; "
+            "keeping the static domains without the address check")
+        return [], []
+    log(f"{set_name}: {provider['name']} gave {len(domains)} domains, "
+        f"{len(raw)} ranges ({len(ips)} after merging)")
+    record = {"fetched": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "domains": domains, "ips": ips}
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix(".tmp")
+        tmp.write_text(json.dumps(record))
+        tmp.replace(cache)
+    except OSError as e:
+        log(f"{set_name}: fresh data is in use, but it could not be cached ({e})")
+    return domains, ips
+
+
+def squid_domains(names):
+    """`*.x` becomes `.x`; a name already covered by a `.parent` entry is dropped,
+    because squid refuses a list holding both."""
+    out = set()
+    for n in names:
+        n = n.strip().lower().rstrip(".")
+        out.add("." + n[2:] if n.startswith("*.") else n)
+    wild = {n for n in out if n.startswith(".")}
+    return sorted(n for n in out
+                  if not any(n != w and (n.endswith(w) or n == w[1:]) for w in wild))
+
+
+def load(name):
+    path = SETS_DIR / f"{name}.toml"
+    if not path.is_file():
+        known = ", ".join(sorted(p.stem for p in SETS_DIR.glob("*.toml")))
+        log(f"unknown set '{name}'; known sets: {known}")
+        sys.exit(2)
+    try:
+        return tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as e:
+        log(f"{path}: {e}")
+        sys.exit(2)
+
+
+def main(argv):
+    if argv == ["--list"]:
+        for p in sorted(SETS_DIR.glob("*.toml")):
+            print(f"{p.stem:12} {tomllib.loads(p.read_text()).get('description', '')}")
+        return 0
+    wanted = [s.strip() for s in os.environ.get("EGRESS_SETS", "").split(",") if s.strip()]
+    names = list(dict.fromkeys(ALWAYS + wanted))
+    OUT.mkdir(parents=True, exist_ok=True)
+    rules = []
+    for name in names:
+        spec = load(name)
+        domains = list(spec.get("domains", []))
+        ips = []
+        provider = spec.get("provider")
+        if provider:
+            if provider.get("name") not in PROVIDERS:
+                log(f"{name}: unknown provider '{provider.get('name')}'")
+                sys.exit(2)
+            extra, ips = provider_data(name, provider)
+            domains += extra
+        acl = f"set_{name.replace('-', '_')}"
+        (OUT / f"{name}.domains").write_text("\n".join(squid_domains(domains)) + "\n")
+        # -n: match the name the client asked for, never a name found by
+        # reverse DNS of an address, so a bare IP cannot pass as its PTR name.
+        rules.append(f'acl {acl} dstdomain -n "{OUT / (name + ".domains")}"')
+        if provider and provider.get("enforce_ips") and ips:
+            (OUT / f"{name}.ips").write_text("\n".join(ips) + "\n")
+            rules.append(f'acl {acl}_ips dst "{OUT / (name + ".ips")}"')
+            rules.append(f"http_access allow localnet {acl} {acl}_ips")
+        else:
+            rules.append(f"http_access allow localnet {acl}")
+    tmp = OUT / "sets.conf.tmp"
+    tmp.write_text("# Generated by egress-refresh; do not edit.\n" + "\n".join(rules) + "\n")
+    tmp.replace(OUT / "sets.conf")
+    log(f"sets in force: {', '.join(names)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

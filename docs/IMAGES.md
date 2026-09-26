@@ -2,59 +2,63 @@
 
 ## What is here
 
-- **`base`**, built from
-  [images/base/Dockerfile](../images/base/Dockerfile) and published as
-  `ghcr.io/ivan-pinatti-labs/devcontainer-base`.
+Six images, each built from `images/<name>/Dockerfile` and published as
+`ghcr.io/ivan-pinatti-labs/devcontainer-<name>`. What each one is trusted
+with, and why they are split this way, is in [LAYERS.md](LAYERS.md).
 
-The base image carries what every repository in the organization needs and
-nothing that only one of them needs: git, the common command line tools, the
-apt signing keys this organization trusts, and rootless Podman for the
-repositories whose tooling starts containers of its own (see "Running
-containers inside it" below).
+| Image | Built on | Carries |
+| --- | --- | --- |
+| `base` | Ubuntu, by digest | git, curl, jq, python3, procps, the trusted apt keys, the dev account |
+| `workbench` | base | Claude Code and Codex, the pinned VS Code extensions, `l2`, the `gh` shim, the agents' managed policy, a podman client |
+| `l2` | base | pre-commit, node, go, shellcheck, the baked linters, a podman client for `--engine` runs |
+| `l2-engine` | base | rootless podman serving a socket (the nested runtime below) |
+| `gh-broker` | base | gh and the broker |
+| `egress-proxy` | base | squid, the egress sets and the program that refreshes them |
 
-There is **no version manager** in it. Tools come from signed package
-repositories, installed with apt; `TOOL_SOURCES.md` is the reference for
-where each one comes from and what vouches for it.
+There is **no version manager** in any of them. Tools come from signed
+package repositories, installed with apt; `TOOL_SOURCES.md` is the reference
+for where each one comes from and what vouches for it.
 
-It deliberately does **not** carry github-cli, pre-commit, nodejs or
-terraform, even though nearly every repository uses one of them. Installing
-them here would rebuild the base image every time any single repository
-changed what it needs. It carries their signing keys instead, which is the
-part that is genuinely common, and enables none of those repositories
-itself: a keyring does nothing until a `sources.list` entry names it.
+The base deliberately carries none of github-cli, pre-commit, nodejs or
+terraform. It carries their signing keys instead, which is the part that is
+genuinely common, and enables none of those repositories itself: a keyring
+does nothing until a `sources.list` entry names it.
 
-## How a repository uses it
+## How a repository uses them
 
-Install what that repository needs on top of the base:
+A repository does not build its own development container any more. It runs
+the shared workbench (`host/workbench up`, [LAYERS.md](LAYERS.md)) and adds
+what its hooks and tests need on top of the shared L2 image, in
+`.devcontainer/l2/Dockerfile`:
 
 ```dockerfile
-FROM ghcr.io/ivan-pinatti-labs/devcontainer-base@sha256:<digest>
+ARG L2_IMAGE=ghcr.io/ivan-pinatti-labs/devcontainer-l2@sha256:<digest>
+FROM ${L2_IMAGE}
 
 USER 0:0
-RUN printf '%s\n' \
-      'deb [arch=amd64 signed-by=/usr/share/keyrings/github-cli.gpg] https://cli.github.com/packages stable main' \
-      > /etc/apt/sources.list.d/github-cli.list \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends gh pre-commit \
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3-pytest \
   && rm -rf /var/lib/apt/lists/*
 USER 1000:1000
 ```
 
-By digest, never by a floating tag. A tag would let a rebuild change the
-toolchain under a checkout with no commit saying so, which is the failure the
-digest pin exists to prevent. Renovate can keep the digest current, and its
-pull request is then the record that the environment changed.
+and names the image in `.devcontainer/l2-image`. By digest, never by a
+floating tag. A tag would let a rebuild change the toolchain under a checkout
+with no commit saying so, which is the failure the digest pin exists to
+prevent. Renovate can keep the digest current, and its pull request is then
+the record that the environment changed.
 
 Package versions are deliberately not pinned; `TOOL_SOURCES.md` says why.
 
 ## Running containers inside it
 
-Most of these repositories start containers from inside their development
-container: pre-commit's `hadolint-docker` and `actionlint-docker` hooks, and
-pre-commit-checklists' tflint. The image carries rootless Podman for that,
-plus a `docker` command that runs it, because pre-commit's `docker_image`
-hooks call `docker` by name, and `podman-compose` so `podman compose` (and
-therefore `docker compose`) resolves a provider.
+This section is about the `l2-engine` image, which is where containers are
+started from now: L2 containers, and the containers a test suite in an
+`l2 --engine` run starts of its own. `host/workbench` passes the flags below
+to the engine; the workbench itself runs none of them. The measurements were
+taken when the nested runtime lived in the development container, and apply
+unchanged to the engine, which is the same runtime in the same SELinux
+domain.
 
 A single nested container needs only the two flags above. A nested **compose
 stack** needs the wider opt in as well, because compose gives its services a
@@ -186,11 +190,12 @@ on the machine runs in, access to every device node.
 
 ## What the build does
 
-`.github/workflows/build-base-image.yml` runs on a pull request touching
-`images/**`, on a push to `main`, weekly on a schedule, and on demand.
+`.github/workflows/build-images.yml` runs `scripts/build-images.sh` on a pull request touching
+`images/**`, on a push to `main`, weekly on a schedule, and on demand. It
+builds the base first and every other image on top of that exact build, then
+takes each image through the same steps:
 
-1. Builds the image for `linux/amd64`, loading it locally rather than
-   pushing.
+1. Builds it for `linux/amd64`, loading it locally rather than pushing.
 2. Scans it for secrets. A finding **fails the build**: a credential baked
    into a layer is not something to report and move on from.
 3. Scans it for vulnerabilities and uploads the result to code scanning.
@@ -205,8 +210,11 @@ on the machine runs in, access to every device node.
    launched from, so a weaker condition would let a feature branch publish.
 
 The weekly rebuild exists because step 4's "a rebuild away" has to actually
-happen. It publishes a new digest and cuts no release, so nothing consumes it
-until a repository bumps its pin.
+happen. It publishes new digests and cuts no release, so nothing consumes
+them until a repository bumps its pin.
+
+Locally, `host/workbench build` builds all six as `localhost/*:local`,
+without scanning or publishing.
 
 ## Changing a signing key
 

@@ -1,0 +1,514 @@
+#!/bin/bash
+: '
+  Build, start and enter the workbench and its helpers. Runs on the host, and
+  does nothing there but call podman. docs/LAYERS.md explains the layers.
+
+  Usage:
+    host/workbench build            build every image locally (localhost/*:local)
+    host/workbench up [WORKSPACE]   start the helpers, the L2 engine and the
+                                    workbench
+    host/workbench unlock           add the ssh key to the agent for 8 hours
+    host/workbench shell [WORKSPACE]
+                                    a shell in the running workbench
+    host/workbench load-l2 [WORKSPACE]
+                                    copy the local L2 images into the L2 engine
+                                    now (up does it when they differ)
+    host/workbench status           what is running
+    host/workbench down [WORKSPACE] stop that workspace (its workbench, engine,
+                                    proxy and network); the shared helpers
+                                    keep running for other workspaces
+    host/workbench helpers          start only the helpers (proxy, broker,
+                                    ssh-agent); what the login unit runs
+    host/workbench helpers-down     stop the shared helpers, which drops the
+                                    unlocked ssh key
+    host/workbench restart-broker   restart the gh broker alone (after
+                                    rebuilding it), keeping the unlocked key
+    host/workbench install-units    install a systemd user unit that starts
+                                    the helpers at login (changes your
+                                    ~/.config/systemd/user; run it yourself)
+
+  WORKSPACE is the folder mounted into the workbench and the L2 engine, at its
+  own path. Default: the main clone of the git repository you are in (so its
+  worktrees are included), else the current directory. A single worktree
+  works too, for a clone whose other folders hold data that must not be
+  relabelled; its git directory is then mounted as well. Workspaces live under
+  WORKBENCH_ROOT (default: the folder holding this clone), which the gh
+  broker sees read only, so gh finds the repository a command ran in.
+
+  A workspace can opt in to more for its L2 engine, by listing profile names
+  in .devcontainer/workbench-profile (one per line), read from the checkout
+  `up` runs in (a worktree counts), else from the workspace. Only the names below are
+  understood; anything else stops `up`, so a repository cannot pass arbitrary
+  flags to podman on the host:
+    nested-network   L2 containers get a bridge network of their own, so a
+                      test suite can start containers that reach each other
+    hooks-engine     pre-commit runs get the engine too (l2 --engine), for
+                      hooks that build or start containers; nothing on the
+                      host side
+    nested-devices   L2 containers may be given /dev/fuse and /dev/net/tun.
+                      Needs the host SELinux module in host/selinux/, which
+                      only root can install (docs/IMAGES.md)
+
+  Each workspace has its own egress proxy and internal network. The proxy
+  allows the egress sets the checkout lists in .devcontainer/egress-sets, one
+  name per line (default: python, node), plus workbench, github and
+  ghcr, which are always on, and ubuntu and nodesource when the checkout has
+  an L2 image of its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/devcontainer-egress-proxy
+  egress-refresh --list` shows every set.
+
+  State kept on the host:
+    ${XDG_DATA_HOME}/workbench/claude, codex  the agents logins and settings,
+        separate from your own ~/.claude and ~/.codex
+    ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket
+    ${XDG_RUNTIME_DIR}/workbench/<name>       the L2 engine socket
+    ${XDG_RUNTIME_DIR}/devcontainer-ssh       the ssh-agent socket, known_hosts
+    podman volume l2-engine-<name>            L2 images, pre-commit caches
+    podman volume egress-cache                providers last good lists
+
+  Exit status codes:
+    1  a prerequisite is missing (the message says which)
+    2  usage error
+'
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+TAG="${WORKBENCH_TAG:-local}"
+BASE="localhost/devcontainer-base:${TAG}"
+WB_IMAGE="localhost/devcontainer-workbench:${TAG}"
+L2_IMAGE="localhost/devcontainer-l2:${TAG}"
+ENGINE_IMAGE="localhost/devcontainer-l2-engine:${TAG}"
+BROKER_IMAGE="localhost/devcontainer-gh-broker:${TAG}"
+PROXY_IMAGE="localhost/devcontainer-egress-proxy:${TAG}"
+
+# Egress sets every workspace gets when it names none of its own; workbench,
+# github and ghcr are always added by the proxy itself.
+DEFAULT_SETS=python,node
+# Every container that talks over a socket to another runs in the same SELinux
+# domain and category, or the connection is refused.
+# shellcheck disable=SC2054 # the comma is inside the SELinux level
+LABEL_OPTS=(--security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666)
+
+DATA="${XDG_DATA_HOME:-${HOME}/.local/share}/workbench"
+RUN="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
+GH_DIR="${RUN}/workbench/gh"
+SSH_DIR="${RUN}/devcontainer-ssh"
+SSH_KEY_DIR="${HOME}/.ssh/devcontainer"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+# The folder holding this repository's main clone, even when this script runs
+# from one of its worktrees.
+MAIN="$(dirname "$(git -C "${HERE}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "${HERE}/.git")")"
+ROOT="${WORKBENCH_ROOT:-$(dirname "${MAIN}")}"
+
+die() { echo "workbench: $*" >&2; exit 1; }
+running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+
+# Two workspaces with the same folder name would map to the same container
+# names. Each container carries its workspace in a label; refuse to reuse one
+# that belongs to a different path.
+check_owner() {
+  local name="$1" label="$2" ws="$3" owner
+  owner="$(podman inspect -f "{{index .Config.Labels \"${label}\"}}" "${name}" 2>/dev/null)" || return 0
+  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
+    || die "${name} belongs to ${owner}, another folder of the same name; stop it first (host/workbench down ${owner})"
+}
+
+workspace() {
+  local w="${1:-}"
+  if [ -z "${w}" ]; then
+    if common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+      w="$(dirname "${common}")"
+    else
+      w="${PWD}"
+    fi
+  fi
+  (cd "${w}" && pwd)
+}
+
+# A workspace's name: the folder's own name, or <clone>-<worktree> for a
+# worktree under a clone's .claude/worktrees, so two repositories' worktrees
+# of the same name never share containers.
+slug() {
+  local name
+  case "$1" in
+    */.claude/worktrees/*) name="$(basename "${1%%/.claude/worktrees/*}")-$(basename "$1")" ;;
+    *) name="$(basename "$1")" ;;
+  esac
+  printf '%s\n' "${name}" | tr -c 'A-Za-z0-9_.\n-' _
+}
+wb_name() { echo "workbench-$(slug "$1")"; }
+engine_name() { echo "l2-engine-$(slug "$1")"; }
+engine_dir() { echo "${RUN}/workbench/$(slug "$1")"; }
+net_name() { echo "workbench-net-$(slug "$1")"; }
+proxy_name() { echo "egress-proxy-$(slug "$1")"; }
+
+# Each workspace has an internal network of its own, 10.203.N.0/24 with N
+# picked when the network is first created, and its proxy at .2 on it.
+ensure_net() {
+  local net used n
+  net="$(net_name "$1")"
+  podman network exists "${net}" && return
+  used="$(podman network ls --format '{{.Name}}' \
+    | xargs -r podman network inspect --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | tr '\n' ' ')"
+  for n in $(seq 1 254); do
+    case " ${used} " in
+      *" 10.203.${n}.0/24 "*) ;;
+      *)
+        podman network create --internal --disable-dns --subnet "10.203.${n}.0/24" "${net}" >/dev/null
+        return ;;
+    esac
+  done
+  die "no free 10.203.N.0/24 subnet left for ${net}"
+}
+
+# When the workspace is a single worktree rather than a whole clone (a clone
+# whose other folders hold data other containers use, which must not be
+# relabelled), its git directory lives outside it: mount just that too.
+git_dir_mount() {
+  local ws="$1" common
+  common="$(git -C "${ws}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  case "${common}/" in
+    "${ws}"/*) ;;
+    *) printf '%s\n' "-v" "${common}:${common}:Z" ;;
+  esac
+}
+
+proxy_ip() {
+  local subnet
+  subnet="$(podman network inspect "$(net_name "$1")" --format '{{range .Subnets}}{{.Subnet}}{{end}}')"
+  echo "${subnet%.0/24}.2"
+}
+
+# The proxy variables for a container on this workspace's network, into the
+# global PROXY_ENV array.
+set_proxy_env() {
+  local url
+  url="http://$(proxy_ip "$1"):8888"
+  # shellcheck disable=SC2054 # the commas are inside NO_PROXY's value
+  PROXY_ENV=(
+    -e HTTPS_PROXY="${url}" -e HTTP_PROXY="${url}" -e NO_PROXY=localhost,127.0.0.1
+    -e https_proxy="${url}" -e http_proxy="${url}" -e no_proxy=localhost,127.0.0.1
+  )
+}
+
+# The egress sets this workspace selected in .devcontainer/egress-sets, one
+# name per line, comma separated for the proxy. The proxy refuses a name it
+# does not know; this only refuses one that could not be a name at all.
+egress_sets() {
+  local src f p out=""
+  src="$(profile_source "$1")"
+  f="${src}/.devcontainer/egress-sets"
+  if [ -f "${f}" ]; then
+    while read -r p; do
+      case "${p}" in
+        '' | '#'*) ;;
+        *[!a-z0-9-]*) die "'${p}' in ${f} is not an egress set name" ;;
+        *) out="${out:+${out},}${p}" ;;
+      esac
+    done < "${f}"
+  else
+    out="${DEFAULT_SETS}"
+  fi
+  # A repository with an L2 image of its own gets it built in the engine by
+  # `l2`, and that build installs from Ubuntu's archive and, through the
+  # source the shared L2 image enables, NodeSource's.
+  [ -f "${src}/.devcontainer/l2/Dockerfile" ] && out="${out:+${out},}ubuntu,nodesource"
+  echo "${out}"
+}
+
+profile_source() {
+  local ws="$1" top
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  case "${top}/" in
+    "${ws}"/*) echo "${top}" ;;
+    *) echo "${ws}" ;;
+  esac
+}
+
+profiles() {
+  local f p
+  f="$(profile_source "$1")/.devcontainer/workbench-profile"
+  [ -f "${f}" ] || return 0
+  while read -r p; do
+    case "${p}" in
+      '' | '#'*) ;;
+      nested-network | nested-devices | hooks-engine) echo "${p}" ;;
+      *) die "unknown profile '${p}' in ${f}" ;;
+    esac
+  done < "${f}"
+}
+
+cmd_build() {
+  podman build -t "${BASE}" "${HERE}/images/base"
+  for i in workbench l2 l2-engine gh-broker egress-proxy; do
+    podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/devcontainer-${i}:${TAG}" "${HERE}/images/${i}"
+  done
+}
+
+start_proxy() {
+  local ws="$1" name sets
+  ensure_net "${ws}"
+  name="$(proxy_name "${ws}")"
+  check_owner "${name}" workbench.proxy "${ws}"
+  running "${name}" && return
+  sets="$(egress_sets "${ws}")"
+  podman rm -f "${name}" >/dev/null 2>&1 || true
+  podman volume exists egress-cache || podman volume create egress-cache >/dev/null
+  podman run -d --name "${name}" \
+    --label workbench.proxy="${ws}" \
+    --network podman --network "$(net_name "${ws}"):ip=$(proxy_ip "${ws}")" \
+    --cap-drop=all --security-opt no-new-privileges --read-only \
+    --tmpfs /run/egress:U --tmpfs /run/squid:U --tmpfs /tmp \
+    -v egress-cache:/var/lib/egress:U \
+    -e EGRESS_SETS="${sets}" \
+    "${PROXY_IMAGE}" >/dev/null
+  for _ in $(seq 1 100); do
+    podman logs "${name}" 2>&1 | grep -q 'Accepting HTTP' && return
+    running "${name}" || break
+    sleep 0.3
+  done
+  podman logs "${name}" 2>&1 | tail -5 >&2
+  die "the egress proxy for ${ws} did not start (sets: ${sets})"
+}
+
+start_broker() {
+  running gh-broker && return
+  podman secret exists gh-devcontainer \
+    || die "no podman secret gh-devcontainer; create it: podman secret create gh-devcontainer <file holding the token>"
+  mkdir -p "${GH_DIR}"
+  chmod 700 "${RUN}/workbench" "${GH_DIR}"
+  podman rm -f gh-broker >/dev/null 2>&1 || true
+  # WORKBENCH_ROOT, read only and not relabelled: the broker can read only
+  # what a workbench has already labelled for this category, which is enough
+  # for gh to find the repository a command was run from.
+  podman run -d --name gh-broker \
+    --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
+    --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
+    --secret gh-devcontainer,type=env,target=GH_TOKEN \
+    -v "${GH_DIR}:/run/gh-broker:Z" \
+    -v "${ROOT}:${ROOT}:ro" \
+    "${BROKER_IMAGE}" >/dev/null
+}
+
+start_ssh_agent() {
+  running devcontainer-ssh-agent && return
+  if [ ! -f "${SSH_KEY_DIR}/id_ed25519" ]; then
+    echo "workbench: no ${SSH_KEY_DIR}/id_ed25519, so no ssh-agent; git push will not work (docs/LAYERS.md)" >&2
+    return
+  fi
+  mkdir -p "${SSH_DIR}"
+  chmod 700 "${SSH_DIR}"
+  if [ ! -s "${SSH_DIR}/known_hosts" ]; then
+    # GitHub's host keys from GitHub's own API, fetched in a container, so the
+    # workbench can verify the host strictly.
+    podman run --rm --network podman "${BASE}" \
+      sh -c 'curl -fsS https://api.github.com/meta | jq -r ".ssh_keys[] | \"github.com \" + ."' \
+      > "${SSH_DIR}/known_hosts"
+  fi
+  podman rm -f devcontainer-ssh-agent >/dev/null 2>&1 || true
+  podman run -d --name devcontainer-ssh-agent \
+    --network=none --cap-drop=all --read-only --security-opt no-new-privileges \
+    --userns=keep-id "${LABEL_OPTS[@]}" \
+    -v "${SSH_DIR}:/sock:Z" -v "${SSH_KEY_DIR}:/key:ro,Z" \
+    --entrypoint ssh-agent "${WB_IMAGE}" -D -a /sock/agent.sock >/dev/null
+}
+
+start_engine() {
+  local ws="$1" name dir extra=() p gitdir=()
+  name="$(engine_name "${ws}")"
+  dir="$(engine_dir "${ws}")"
+  check_owner "${name}" workbench.engine "${ws}"
+  running "${name}" && return
+  for p in $(profiles "${ws}"); do
+    case "${p}" in
+      nested-network)
+        extra+=(--device /dev/net/tun --security-opt unmask=/proc/sys
+          -e CONTAINERS_CONF_OVERRIDE=/usr/local/share/devcontainer/containers-bridge-network.conf) ;;
+      nested-devices)
+        extra+=(--device /dev/net/tun) ;;
+    esac
+  done
+  mkdir -p "${dir}"
+  chmod 700 "${dir}"
+  set_proxy_env "${ws}"
+  mapfile -t gitdir < <(git_dir_mount "${ws}")
+  podman volume exists "${name}" || podman volume create "${name}" >/dev/null
+  podman rm -f "${name}" >/dev/null 2>&1 || true
+  podman run -d --name "${name}" \
+    --label workbench.engine="${ws}" \
+    --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" --device /dev/fuse \
+    "${extra[@]}" \
+    --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
+    -v "${ws}:${ws}:Z" "${gitdir[@]}" \
+    -v "${dir}:/run/l2-engine:Z" \
+    -v "${name}:/home/dev/.local/share/containers" \
+    "${ENGINE_IMAGE}" >/dev/null
+  for _ in $(seq 1 50); do
+    [ -S "${dir}/podman.sock" ] && return
+    sleep 0.2
+  done
+  die "the L2 engine did not open its socket; podman logs ${name}"
+}
+
+start_workbench() {
+  local ws="$1" name gitdir=()
+  name="$(wb_name "${ws}")"
+  check_owner "${name}" workbench.workspace "${ws}"
+  running "${name}" && return
+  mkdir -p "${DATA}/claude" "${DATA}/codex"
+  set_proxy_env "${ws}"
+  mapfile -t gitdir < <(git_dir_mount "${ws}")
+  podman rm -f "${name}" >/dev/null 2>&1 || true
+  podman run -d --name "${name}" \
+    --label workbench.workspace="${ws}" \
+    --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
+    --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
+    -e GIT_AUTHOR_NAME="$(git config --get user.name || true)" -e GIT_AUTHOR_EMAIL="$(git config --get user.email || true)" \
+    -e GIT_COMMITTER_NAME="$(git config --get user.name || true)" -e GIT_COMMITTER_EMAIL="$(git config --get user.email || true)" \
+    -e SSH_AUTH_SOCK=/run/devcontainer-ssh/agent.sock \
+    -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
+    -v "${ws}:${ws}:Z" "${gitdir[@]}" \
+    -v "${DATA}/claude:/home/dev/.claude:Z" \
+    -v "${DATA}/codex:/home/dev/.codex:Z" \
+    -v "${GH_DIR}:/run/gh-broker" \
+    -v "${SSH_DIR}:/run/devcontainer-ssh" \
+    -v "$(engine_dir "${ws}"):/run/l2-engine" \
+    -w "${ws}" \
+    --entrypoint catatonit "${WB_IMAGE}" -- workbench-init >/dev/null
+}
+
+cmd_up() {
+  local ws
+  ws="$(workspace "${1:-}")"
+  profiles "${ws}" >/dev/null
+  case "${ws}/" in
+    "${ROOT}"/*) ;;
+    *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
+  esac
+  start_helpers
+  start_proxy "${ws}"
+  start_engine "${ws}"
+  sync_l2 "${ws}"
+  start_workbench "${ws}"
+  echo "workbench: up for ${ws} ($(wb_name "${ws}"), $(engine_name "${ws}"))"
+  echo "workbench: terminal: host/workbench shell; editor: Attach to Running Container, $(wb_name "${ws}")"
+}
+
+start_helpers() {
+  mkdir -p "${SSH_DIR}" "${GH_DIR}"
+  start_broker
+  start_ssh_agent
+}
+
+cmd_helpers() {
+  start_helpers
+  echo "workbench: helpers up (gh-broker, devcontainer-ssh-agent)"
+}
+
+cmd_helpers_down() {
+  podman rm -f -t 5 gh-broker devcontainer-ssh-agent >/dev/null 2>&1 || true
+}
+
+cmd_restart_broker() {
+  podman rm -f -t 5 gh-broker >/dev/null 2>&1 || true
+  start_broker
+  echo "workbench: gh broker restarted"
+}
+
+cmd_install_units() {
+  local dir="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+  mkdir -p "${dir}"
+  cat > "${dir}/workbench-helpers.service" <<UNIT
+# Written by ${HERE}/host/workbench install-units.
+[Unit]
+Description=Workbench helpers: egress proxy, gh broker, ssh-agent
+After=default.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=WORKBENCH_ROOT=${ROOT}
+ExecStart=${HERE}/host/workbench helpers
+ExecStop=${HERE}/host/workbench helpers-down
+
+[Install]
+WantedBy=default.target
+UNIT
+  systemctl --user daemon-reload
+  systemctl --user enable workbench-helpers.service
+  echo "workbench: installed ${dir}/workbench-helpers.service; it starts the helpers at your next login"
+  echo "workbench: remove with: systemctl --user disable workbench-helpers.service && rm ${dir}/workbench-helpers.service"
+}
+
+cmd_unlock() {
+  running devcontainer-ssh-agent || die "the ssh-agent is not running; host/workbench up first"
+  podman exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent \
+    ssh-add -t 8h /key/id_ed25519
+}
+
+cmd_shell() {
+  local ws name cwd
+  ws="$(workspace "${1:-}")"
+  name="$(wb_name "${ws}")"
+  running "${name}" || cmd_up "${ws}" >/dev/null
+  cwd="${PWD}"
+  case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
+  exec podman exec -it -w "${cwd}" "${name}" bash
+}
+
+cmd_load_l2() {
+  local ws name image
+  ws="$(workspace "${1:-}")"
+  name="$(engine_name "${ws}")"
+  running "${name}" || die "no L2 engine running for ${ws}; host/workbench up first"
+  for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
+    podman save "${image}" | podman exec -i "${name}" podman load
+  done
+}
+
+# Copy the L2 images into the engine when they are missing there or older
+# than the host's, so a rebuilt L2 image reaches every workspace on its next
+# `up` without anyone remembering load-l2.
+sync_l2() {
+  local name image mine theirs
+  name="$(engine_name "$1")"
+  for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
+    mine="$(podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" || continue
+    theirs="$(podman exec "${name}" podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null || true)"
+    if [ "${mine}" != "${theirs}" ]; then
+      echo "workbench: copying ${image} into the L2 engine"
+      podman save "${image}" | podman exec -i "${name}" podman load --quiet >/dev/null
+    fi
+  done
+}
+
+cmd_status() {
+  podman ps -a --filter name='^(egress-proxy-.*|gh-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)$' \
+    --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+}
+
+cmd_down() {
+  local ws
+  ws="$(workspace "${1:-}")"
+  podman rm -f -t 5 "$(wb_name "${ws}")" "$(engine_name "${ws}")" "$(proxy_name "${ws}")" \
+    >/dev/null 2>&1 || true
+  podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
+  echo "workbench: down"
+}
+
+case "${1:-}" in
+  build) cmd_build ;;
+  up) cmd_up "${2:-}" ;;
+  unlock) cmd_unlock ;;
+  shell) cmd_shell "${2:-}" ;;
+  load-l2) cmd_load_l2 "${2:-}" ;;
+  status) cmd_status ;;
+  down) cmd_down "${2:-}" ;;
+  helpers) cmd_helpers ;;
+  helpers-down) cmd_helpers_down ;;
+  restart-broker) cmd_restart_broker ;;
+  install-units) cmd_install_units ;;
+  -h | --help | help) sed -n '3,55p' "$0" ;;
+  *) sed -n '3,20p' "$0" >&2; exit 2 ;;
+esac

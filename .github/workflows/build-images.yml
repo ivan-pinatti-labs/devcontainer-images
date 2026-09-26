@@ -1,0 +1,93 @@
+---
+name: Images
+
+# Builds, scans and publishes every image: base first, then the workbench,
+# L2, the L2 engine and the two helpers on top of that exact base build.
+#
+# The work is scripts/build-images.sh, which runs the same way on a developer
+# machine with rootless podman (docs/IMAGES.md, "What the build does"), so the
+# logic here was exercised before CI ever ran it. Every image is pushed to a
+# throwaway registry on the runner and scanned from there, and publishing
+# copies exactly those manifests, by digest, to GHCR: what is published is
+# what was scanned, not a second build of it.
+#
+# A pull request builds and scans but never publishes, so a fork cannot push
+# an image and a contributor still finds out whether their change builds.
+
+on:
+  pull_request:
+    paths:
+      - images/**
+      - scripts/build-images.sh
+      - .github/workflows/build-images.yml
+  push:
+    branches: [main]
+    paths:
+      - images/**
+      - scripts/build-images.sh
+      - .github/workflows/build-images.yml
+  # Upstream security fixes land in Ubuntu's own packages, not in this
+  # repository, so nothing here would ever rebuild to pick them up without a
+  # schedule. Weekly rather than daily: the apt upgrade in the base Dockerfile
+  # is what collects them, and a daily rebuild would republish near identical
+  # digests six extra times a week for nothing.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build and scan the images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # Writing the scan results into this repository's code scanning tab.
+      security-events: write
+      # Pushing to GHCR. Harmless on a pull request, where nothing publishes.
+      packages: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Nothing here pushes commits, and a checkout that leaves the
+          # token in .git/config hands it to every later step.
+          persist-credentials: false
+
+      # The builder runs on the host network, so it reaches the throwaway
+      # registry the script starts at localhost:5000, which speaks plain HTTP.
+      # A docker-container builder rather than the default one, because only
+      # it attaches SBOM and provenance attestations.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+
+      # Gated on the branch rather than on "not a pull request".
+      # workflow_dispatch runs against whichever ref it is launched from and
+      # actions/checkout takes that same ref, so excluding only pull requests
+      # would let anyone able to dispatch this workflow publish a feature
+      # branch's images with this job's packages: write. push and schedule
+      # both carry refs/heads/main, so this costs nothing the pipeline needs.
+      - name: Build, scan, and publish from main
+        env:
+          RUNTIME: docker
+          SARIF_DIR: ${{ runner.temp }}/sarif
+          PUBLISH_TO: ${{ github.ref == 'refs/heads/main' && 'ghcr.io/ivan-pinatti-labs' || '' }}
+          TAGS: latest sha-${{ github.sha }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.GITHUB_TOKEN || '' }}
+        run: scripts/build-images.sh
+
+      # One SARIF file per image, each carrying its own category, so the six
+      # reports sit side by side in code scanning.
+      - name: Upload the vulnerability reports to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: ${{ runner.temp }}/sarif

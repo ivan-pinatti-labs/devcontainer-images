@@ -1,0 +1,25 @@
+#!/bin/sh
+# Installed by l2-hooks-install. Runs this repository's pre-commit hooks in L2
+# (no network, no credentials) instead of in the workbench.
+#
+# First the hook environments are installed or confirmed, with network through
+# the egress proxy and the working tree read only; a quick no-op once they
+# exist. Then l2-pre-commit runs the hooks with no network at all.
+#
+# Outside the workbench there is no `l2`. Git hooks are shared by every
+# checkout of a clone, so the hook that was here before (kept as
+# @HOOK_TYPE@.pre-l2) still runs there, rather than a commit failing.
+set -e
+hook_dir="$(cd "$(dirname "$0")" && pwd)"
+if ! command -v l2 >/dev/null 2>&1; then
+  if [ -x "${hook_dir}/@HOOK_TYPE@.pre-l2" ]; then
+    exec "${hook_dir}/@HOOK_TYPE@.pre-l2" "$@"
+  fi
+  echo "@HOOK_TYPE@: this hook runs in L2; commit from the workbench (host/workbench shell)" >&2
+  exit 1
+fi
+if ! out="$(l2 --net --ro -- l2-prepare-hooks 2>&1)"; then
+  printf '%s\n' "${out}" >&2
+  exit 1
+fi
+exec l2-pre-commit hook-impl --config=.pre-commit-config.yaml --hook-type=@HOOK_TYPE@ --hook-dir "${hook_dir}" -- "$@"

@@ -1,0 +1,7 @@
+description = "AWS service APIs, any service and region. AWS publishes its address ranges at ip-ranges.amazonaws.com, and they are enforced: an amazonaws.com name has to resolve inside them."
+domains = ["*.amazonaws.com", "*.api.aws"]
+
+[provider]
+name = "aws-ip-ranges"
+services = ["AMAZON"]
+enforce_ips = true

@@ -1,0 +1,2 @@
+description = "The npm registry, for npm and for pre-commit's node hook environments."
+domains = ["registry.npmjs.org"]
