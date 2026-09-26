@@ -350,20 +350,24 @@ cmd_build() {
 # not build them. Prints what each tag resolved to: the published index
 # digest, the one to pin by, rather than this platform's manifest.
 cmd_pull() {
-  local i
+  local i ref
   for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy; do
-    echo "workbench: ${i} $(pull_published "${i}")"
+    ref="$(pull_published "${i}")" || die "could not pull ${REGISTRY}/airlock-${i}"
+    echo "workbench: ${i} ${ref}"
   done
 }
 
 # Pull one published image, tag it as the local one, and print the reference
 # to pin it by: the published index digest, not this platform's manifest.
+# errexit does not reach into a command substitution, so every step returns
+# on failure itself, and callers check the status.
 pull_published() {
   local ref mine index
   ref="${REGISTRY}/airlock-$1:${WORKBENCH_PULL_TAG:-latest}"
-  podman pull --quiet "${ref}" >/dev/null
-  podman tag "${ref}" "localhost/airlock-$1:${TAG}"
-  mine="$(podman image inspect --format '{{.Digest}}' "${ref}")"
+  podman pull --quiet "${ref}" >/dev/null || return 1
+  podman tag "${ref}" "localhost/airlock-$1:${TAG}" || return 1
+  mine="$(podman image inspect --format '{{.Digest}}' "${ref}")" || return 1
+  [ -n "${mine}" ] || return 1
   index="$(podman image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${ref}" \
     | grep -F "${REGISTRY}/airlock-$1@" | grep -vF "${mine}" | head -n1 || true)"
   echo "${index:-${REGISTRY}/airlock-$1@${mine}}"
@@ -409,7 +413,7 @@ cmd_init() {
   if [ -e "${f}" ]; then
     echo "workbench: kept ${f}"
   else
-    l2="$(pull_published l2)"
+    l2="$(pull_published l2)" || die "could not pull ${REGISTRY}/airlock-l2; nothing written to ${f}"
     cat > "${f}" <<DOCKERFILE
 # This repository's L2 image: where its hooks, tests and package installs
 # run, with the working tree and nothing else (no network, no credentials).
