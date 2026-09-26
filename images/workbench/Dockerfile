@@ -88,9 +88,9 @@ RUN printf '%s\n' \
 # postinstall that is needed. See docs/TOOL_SOURCES.md for why npm, why
 # pinned, and what each package's signature does and does not prove.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.276
+ARG CLAUDE_CODE_VERSION=2.1.278
 # renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.155.0
+ARG CODEX_VERSION=0.155.1
 WORKDIR /opt/agent-clis
 RUN set -eu; \
   export HOME=/root npm_config_cache=/tmp/npm-cache; \
