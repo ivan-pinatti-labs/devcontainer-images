@@ -3,25 +3,27 @@ cff-version: 1.2.0
 message: >
   If you use these images, or the build and scanning pipeline behind them,
   consider citing this repository using the metadata below.
-title: devcontainer-images
+title: devcontainer-airlock
 abstract: >
-  Container images for developing and running the ivan-pinatti-labs
-  repositories: one shared base image carrying the common toolchain, plus
-  thin per repository layers on top, built, scanned and signed in CI and
-  consumed by digest.
+  Secure, layered devcontainers for AI coding agents: a workbench per agent
+  with no GitHub token and no ssh key, isolated containers with no network
+  for hooks, tests and installs, a GitHub broker, an ssh-agent and an egress
+  proxy, built and scanned in CI and consumed by digest.
 authors:
   - given-names: Ivan
     family-names: Pinatti
     alias: ivan-pinatti
     website: https://github.com/ivan-pinatti
 license: Apache-2.0
-repository-code: https://github.com/ivan-pinatti-labs/devcontainer-images
-url: https://github.com/ivan-pinatti-labs/devcontainer-images
+repository-code: https://github.com/ivan-pinatti-labs/devcontainer-airlock
+url: https://github.com/ivan-pinatti-labs/devcontainer-airlock
 keywords:
   - container
   - devcontainer
   - podman
   - development-environment
   - supply-chain-security
+  - ai-agents
+  - sandbox
 version: 0.1.0
 date-released: "2026-09-14"

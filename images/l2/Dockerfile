@@ -8,7 +8,7 @@
 # This is the shared L2 image. A repository that needs more (terraform, a test
 # framework) builds a thin layer on top of it and names that image in its
 # .devcontainer/l2-image.
-ARG BASE_IMAGE=localhost/devcontainer-base:local
+ARG BASE_IMAGE=localhost/airlock-base:local
 
 # Linters that upstream only ships as container images, and that pre-commit
 # hooks used to run with `docker run`. A container cannot start another
@@ -124,6 +124,6 @@ ENV HOME=/root \
     GOTOOLCHAIN=local \
     GOPROXY=file:///usr/local/share/go-modules,off
 
-LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
+LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="L2 of the ivan-pinatti-labs images: pre-commit, language runtimes and baked linters, run with no network and no credentials." \
       org.opencontainers.image.licenses="Apache-2.0"

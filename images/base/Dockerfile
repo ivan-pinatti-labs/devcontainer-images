@@ -103,7 +103,7 @@ WORKDIR /workspace
 ENV HOME=/home/dev \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
+LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="The floor of the ivan-pinatti-labs images: git, common command line tools, the trusted apt signing keys and the dev account. No runtime, agent or toolchain." \
       org.opencontainers.image.licenses="Apache-2.0"
 

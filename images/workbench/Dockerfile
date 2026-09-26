@@ -14,7 +14,7 @@
 # traffic leaves through the egress proxy. Project code (hooks, tests,
 # installs, throwaway binaries) does not run here at all; `l2` sends it to the
 # L2 engine, a separate container. docs/LAYERS.md has the whole picture.
-ARG BASE_IMAGE=localhost/devcontainer-base:local
+ARG BASE_IMAGE=localhost/airlock-base:local
 
 # The pinned VS Code extensions, installed in a stage of their own so the VS
 # Code server used to install them never reaches an image. The server the
@@ -140,9 +140,9 @@ COPY bin/finish-image /usr/local/libexec/workbench/finish-image
 ENV NODE_USE_ENV_PROXY=1 \
     GH_BROKER_SOCK=/run/gh-broker/gh.sock \
     CONTAINER_HOST=unix:///run/l2-engine/podman.sock \
-    L2_IMAGE=localhost/devcontainer-l2:local
+    L2_IMAGE=localhost/airlock-l2:local
 
-LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
+LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 CMD ["/bin/bash"]

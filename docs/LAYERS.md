@@ -203,7 +203,7 @@ Measured 2026-09-24, all in L2:
 
 | Repository | What | Result |
 | --- | --- | --- |
-| devcontainer-images | every commit on this branch | all hooks, through the git hooks |
+| devcontainer-airlock | every commit on this branch | all hooks, through the git hooks |
 | gh-actions | 44 hooks over every file; the pytest suite | 4 seconds; 261 passed, 94% coverage, in 18 seconds |
 | pre-commit-checklists | its own self-test suite (`l2 --net`) | 160 of 160 assertions |
 | rsync-crypt | the suite, which builds the image and starts sshd and gocryptfs containers (`l2 --engine`) | 311 passed in 20 seconds |
@@ -299,7 +299,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `alpine`, `trivy`, `sigstore` | Alpine packages, trivy's database, sigstore's trust root | |
 | `aws` | AWS service APIs | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
 
-`podman run --rm localhost/devcontainer-egress-proxy:local egress-refresh
+`podman run --rm localhost/airlock-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it
 needs in `.devcontainer/egress-sets`, one per line (with no file: `python`
 and `node`); `workbench`, `github` and `ghcr` are always added, and

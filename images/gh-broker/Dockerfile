@@ -5,7 +5,7 @@
 # and the token, and returns their output. The workbench, and anything running
 # in it (an agent, an extension), can use GitHub through it, but can never
 # read the token itself. docs/LAYERS.md, "GitHub access".
-ARG BASE_IMAGE=localhost/devcontainer-base:local
+ARG BASE_IMAGE=localhost/airlock-base:local
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 USER 0:0
@@ -28,7 +28,7 @@ ENV GH_PROMPT_DISABLED=1 \
     GH_NO_UPDATE_NOTIFIER=1 \
     XDG_CACHE_HOME=/tmp \
     GH_BROKER_SOCK=/run/gh-broker/gh.sock
-LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
+LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="Holds the GitHub token and runs allowlisted gh commands for the ivan-pinatti-labs workbench." \
       org.opencontainers.image.licenses="Apache-2.0"
 CMD ["python3", "/usr/local/libexec/gh-broker/broker.py"]

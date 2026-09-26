@@ -6,7 +6,7 @@
 # over a podman socket. Because L2 containers run in here rather than inside
 # the workbench, they cannot see the workbench's processes or reach anything
 # it listens on. docs/LAYERS.md has the whole picture.
-ARG BASE_IMAGE=localhost/devcontainer-base:local
+ARG BASE_IMAGE=localhost/airlock-base:local
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 USER 0:0
@@ -55,7 +55,7 @@ RUN install -m 0644 /tmp/containers/containers.conf /tmp/containers/storage.conf
 
 USER 1000:1000
 WORKDIR /workspace
-LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
+LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="The L2 engine of the ivan-pinatti-labs workbench: rootless podman serving a socket, with the workspace mounted and no credentials." \
       org.opencontainers.image.licenses="Apache-2.0"
 ENTRYPOINT ["catatonit", "--"]

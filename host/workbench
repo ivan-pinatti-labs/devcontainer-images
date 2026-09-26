@@ -64,7 +64,7 @@
   allows the egress sets the checkout lists in .devcontainer/egress-sets, one
   name per line (default: python, node), plus workbench, github and
   ghcr, which are always on, and ubuntu and nodesource when the checkout has
-  an L2 image of its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/devcontainer-egress-proxy
+  an L2 image of its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/airlock-egress-proxy
   egress-refresh --list` shows every set.
 
   State kept on the host:
@@ -86,16 +86,16 @@ set -o nounset
 set -o pipefail
 
 TAG="${WORKBENCH_TAG:-local}"
-BASE="localhost/devcontainer-base:${TAG}"
+BASE="localhost/airlock-base:${TAG}"
 # One workbench image per agent, built from the same Dockerfile.
-wb_image() { echo "localhost/devcontainer-workbench-$1:${TAG}"; }
+wb_image() { echo "localhost/airlock-workbench-$1:${TAG}"; }
 # Every agent there is a workbench for, and the ones `up` starts.
 KNOWN_AGENTS="claude codex"
 AGENTS="${WORKBENCH_AGENTS:-${KNOWN_AGENTS}}"
-L2_IMAGE="localhost/devcontainer-l2:${TAG}"
-ENGINE_IMAGE="localhost/devcontainer-l2-engine:${TAG}"
-BROKER_IMAGE="localhost/devcontainer-gh-broker:${TAG}"
-PROXY_IMAGE="localhost/devcontainer-egress-proxy:${TAG}"
+L2_IMAGE="localhost/airlock-l2:${TAG}"
+ENGINE_IMAGE="localhost/airlock-l2-engine:${TAG}"
+BROKER_IMAGE="localhost/airlock-gh-broker:${TAG}"
+PROXY_IMAGE="localhost/airlock-egress-proxy:${TAG}"
 
 # Egress sets every workspace gets when it names none of its own; workbench,
 # github and ghcr are always added by the proxy itself.
@@ -264,7 +264,7 @@ cmd_build() {
     podman build --build-arg "BASE_IMAGE=${BASE}" --target "${i}" -t "$(wb_image "${i}")" "${HERE}/images/workbench"
   done
   for i in l2 l2-engine gh-broker egress-proxy; do
-    podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/devcontainer-${i}:${TAG}" "${HERE}/images/${i}"
+    podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/airlock-${i}:${TAG}" "${HERE}/images/${i}"
   done
 }
 

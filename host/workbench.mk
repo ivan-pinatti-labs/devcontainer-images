@@ -1,6 +1,6 @@
 # make targets for the workbench, for any repository's Makefile to include:
 #
-#   WORKBENCH_HOME ?= <path to a devcontainer-images clone>
+#   WORKBENCH_HOME ?= <path to a devcontainer-airlock clone>
 #   -include $(WORKBENCH_HOME)/host/workbench.mk
 #
 # Each target calls host/workbench next to this file, for the repository

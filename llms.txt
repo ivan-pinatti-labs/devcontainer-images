@@ -1,26 +1,29 @@
-# devcontainer-images
+# devcontainer-airlock
 
-> Container images for developing and running the ivan-pinatti-labs
-> repositories, built and scanned in CI and consumed by digest.
+> Secure, layered devcontainers for AI coding agents: a workbench per agent
+> with no GitHub token and no ssh key, isolated containers with no network
+> for hooks, tests and installs, and a broker and an egress proxy beside them.
+> Rootless podman.
 > Apache License 2.0. Author: Ivan Pinatti (https://github.com/ivan-pinatti).
-> Canonical repository: https://github.com/ivan-pinatti-labs/devcontainer-images
+> Canonical repository: https://github.com/ivan-pinatti-labs/devcontainer-airlock
 
 ## What it does
 
-Carries one shared base image with the tooling every repository in the
-organization needs (git, the GitHub CLI, pre-commit, a version manager and
-the scanners), so work on those repositories happens inside a container
-rather than on the host. A repository needing more than the base adds a thin
-layer of its own on top. Images are built, linted, scanned and signed in CI,
-published to the GitHub Container Registry, and consumed by digest so a
-rebuild never changes what a repository builds against without a commit.
-
-Nothing is published yet: this repository currently carries the scaffolding,
-and the base image plus its build pipeline land next.
+Splits a development environment for coding agents (Claude Code, Codex) into
+layers by what each one is trusted with. Each agent works in a workbench of
+its own that holds no GitHub token, no ssh key and no other agent's login.
+Hooks, tests, package installs and throwaway binaries run in L2 containers
+with only the working tree, no network and no credentials. A GitHub broker
+holds the token and runs an allowlist of gh commands, an ssh-agent holds the
+key, and an egress proxy per workspace allows only the services a project
+names. Images are built, linted and scanned in CI, published to the GitHub
+Container Registry as `airlock-<name>`, and consumed by digest.
+[docs/LAYERS.md](docs/LAYERS.md) is the reference.
 
 ## Key files
 
 - [README.md](README.md): Pitch, quickstart, and usage
+- [docs/LAYERS.md](docs/LAYERS.md): The layers, what is a boundary and what is policy, daily use
 - [AGENTS.md](AGENTS.md): Instructions for AI coding agents and contributors,
   imported by [CLAUDE.md](CLAUDE.md)
 - [docs/MERGE_PIPELINE.md](docs/MERGE_PIPELINE.md): How a pull request gets
