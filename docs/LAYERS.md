@@ -374,12 +374,16 @@ So golang hooks do not use it. pre-commit builds them from source, which
 means they need Go modules rather than a binary, and the L2 image carries
 exactly those modules as a read only module proxy
 (`images/l2/go-modules.txt`), fetched and verified against Go's checksum
-database in a throwaway stage of the image build. L2 runs with `GOPROXY`
-pointing there and nowhere else, and checks the checksum database entries it
-carries, all offline. A hook pinned to a version missing from the list fails
-with "module lookup disabled by GOPROXY=off": bump the list first, then the
-pin. Select `golang` only to build Go against the network, as building the
-L2 image itself does.
+database in a throwaway stage of the image build. The same installs then run
+again from that proxy alone, offline, so a module missing from it fails the
+image build. L2 runs with `GOPROXY` pointing there and nowhere else, and
+does not ask the checksum database again: the check happened at build time,
+and the image digest pins the result. (Asking it offline did not work:
+measured 2026-09-26, a lookup recorded at one tree size could not be proved
+against the later tree head without tiles the build never fetched.) A hook
+pinned to a version missing from the list fails with "module lookup disabled
+by GOPROXY=off": bump the list first, then the pin. Select `golang` only
+to build Go against the network, as building the L2 image itself does.
 
 ## Extensions
 

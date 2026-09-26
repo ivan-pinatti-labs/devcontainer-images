@@ -23,9 +23,10 @@ FROM docker.io/dotenvlinter/dotenv-linter:4.0.0@sha256:815fbc7bdd429f5182c349c57
 # The Go modules golang hooks build from (go-modules.txt says which, and
 # why), fetched here in a throwaway stage with the network, by doing exactly
 # what pre-commit does. Go verifies each one against its checksum database
-# as it downloads. What is kept is the module cache's download tree, which is
-# a module proxy as it stands, plus the checksum database entries Go read,
-# so L2 verifies against them offline too.
+# as it downloads; that is where the check happens. What is kept is the module
+# cache's download tree, which is a module proxy as it stands. The same
+# installs then run again from that tree alone, offline, in a fresh cache, so
+# a module missing from it fails this build rather than a hook in L2.
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE} AS go-modules
 # A build stage only; nothing from it runs in L2, and only the module tree is
@@ -41,23 +42,26 @@ COPY go-modules.txt /tmp/go-modules.txt
 # through the variable).
 # hadolint ignore=DL3062
 RUN set -eu; \
-  export GOPATH=/tmp/gopath GOFLAGS=-modcacherw GOTOOLCHAIN=local; \
+  export GOFLAGS=-modcacherw GOTOOLCHAIN=local; \
   grep -vE '^[[:space:]]*(#|$)' /tmp/go-modules.txt > /tmp/list; \
-  while read -r what rev; do \
-    if [ -n "${rev}" ]; then \
-      src="$(mktemp -d)"; \
-      git clone --quiet --depth 1 --branch "${rev}" "${what}" "${src}"; \
-      go -C "${src}" install ./...; \
-    else \
-      go install "${what}"; \
-    fi; \
-  done < /tmp/list; \
+  install_all() { \
+    while read -r what rev; do \
+      if [ -n "${rev}" ]; then \
+        src="$(mktemp -d)"; \
+        git clone --quiet --depth 1 --branch "${rev}" "${what}" "${src}"; \
+        go -C "${src}" install ./...; \
+      else \
+        go install "${what}"; \
+      fi; \
+    done < /tmp/list; \
+  }; \
+  GOPATH=/tmp/gopath install_all; \
   out=/usr/local/share/go-modules; \
-  mkdir -p "${out}/sumdb/sum.golang.org"; \
-  cp -r "${GOPATH}/pkg/mod/cache/download/." "${out}/"; \
-  cp "${GOPATH}/pkg/sumdb/sum.golang.org/latest" "${out}/sumdb/sum.golang.org/latest"; \
-  : > "${out}/sumdb/sum.golang.org/supported"; \
+  mkdir -p "${out}"; \
+  cp -r /tmp/gopath/pkg/mod/cache/download/. "${out}/"; \
+  rm -rf "${out}/sumdb"; \
   find "${out}" -type f \( -name '*.lock' -o -name '*.ziphash' -o -name '*.partial' \) -delete; \
+  GOPATH=/tmp/check GOPROXY="file://${out},off" GOSUMDB=off install_all; \
   chmod -R a-w,a+rX "${out}"
 
 # hadolint ignore=DL3006
@@ -117,12 +121,15 @@ WORKDIR /workspace
 # GOTOOLCHAIN=local: go uses the toolchain installed here and never downloads
 # one of its own. GOPROXY: modules come from the baked proxy and nowhere
 # else, even on a run with the network; `off` makes a missing one fail by
-# name. A repository whose own L2 layer builds Go against the network sets
+# name. GOSUMDB=off: those modules were checked against Go's checksum
+# database when this image was built, and the image digest pins them since;
+# asking the database again offline needs proofs the build never fetched. A repository whose own L2 layer builds Go against the network sets
 # its own GOPROXY there, and selects the golang egress set.
 ENV HOME=/root \
     CHECKPOINT_DISABLE=1 \
     GOTOOLCHAIN=local \
-    GOPROXY=file:///usr/local/share/go-modules,off
+    GOPROXY=file:///usr/local/share/go-modules,off \
+    GOSUMDB=off
 
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="L2 of the ivan-pinatti-labs images: pre-commit, language runtimes and baked linters, run with no network and no credentials." \
