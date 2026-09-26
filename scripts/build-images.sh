@@ -38,7 +38,9 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-IMAGES=(workbench l2 l2-engine gh-broker egress-proxy)
+# workbench-<agent> is a target of images/workbench/Dockerfile; the two share
+# every layer below their agent stage, so the second build reuses the first.
+IMAGES=(workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy)
 PREFIX=devcontainer
 
 # Pinned by digest; Renovate keeps them current.
@@ -75,18 +77,21 @@ staging_up() {
 
 # Build one image, push it to staging, print its digest.
 build() {
-  local name="$1" base="${2:-}" ref args=()
+  local name="$1" base="${2:-}" ref dir="$1" args=()
   ref="${STAGING}/${PREFIX}-${name}:ci"
   [ -n "${base}" ] && args+=(--build-arg "BASE_IMAGE=${base}")
+  case "${name}" in
+    workbench-*) dir=workbench; args+=(--target "${name#workbench-}") ;;
+  esac
   if [ "${RUNTIME}" = docker ]; then
     # buildx, for the SBOM and provenance attestations, which travel with the
     # image when it is copied on to the real registry.
     docker buildx build "${args[@]}" --push --sbom=true --provenance=mode=max \
       --metadata-file "${SARIF_DIR}/${name}.build.json" \
-      -t "${ref}" "${HERE}/images/${name}" >&2
+      -t "${ref}" "${HERE}/images/${dir}" >&2
     jq -r '."containerimage.digest"' "${SARIF_DIR}/${name}.build.json"
   else
-    podman build --tls-verify=false "${args[@]}" -t "${ref}" "${HERE}/images/${name}" >&2
+    podman build --tls-verify=false "${args[@]}" -t "${ref}" "${HERE}/images/${dir}" >&2
     podman push --tls-verify=false --digestfile "${SARIF_DIR}/${name}.digest" "${ref}" >&2
     cat "${SARIF_DIR}/${name}.digest"
   fi

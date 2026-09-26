@@ -1,0 +1,9 @@
+{
+  "window.title": "Claude workbench: ${rootName}${separator}${activeEditorShort}",
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#8a4b2d",
+    "titleBar.activeForeground": "#ffffff",
+    "statusBar.background": "#8a4b2d",
+    "statusBar.foreground": "#ffffff"
+  }
+}
