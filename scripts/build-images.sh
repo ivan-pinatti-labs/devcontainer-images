@@ -118,10 +118,13 @@ scan() {
   trivy --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 "${ref}"
 }
 
-# Copy one scanned image, by digest, to TO. The credentials stay in the
-# environment rather than on a command line. The skopeo image's entrypoint is
-# skopeo itself, so the shell is named as the entrypoint. TO is the throwaway
-# registry for a rehearsal, which is plain http and has no credentials.
+# Copy one scanned image, by digest, to TO. The token never appears on a
+# command line, where any process listing would show it: it reaches the
+# container in the environment, and skopeo reads it on stdin into an auth
+# file only the container can read, which goes when the container does. The
+# skopeo image's entrypoint is skopeo itself, so the shell is named as the
+# entrypoint. TO is the throwaway registry for a rehearsal, which is plain
+# http and has no credentials.
 publish() {
   local name="$1" digest="$2" to="$3" rehearsal=false tag
   [ "${to}" = "${STAGING}/rehearsal" ] && rehearsal=true
@@ -129,11 +132,16 @@ publish() {
     log "publishing ${name} ${digest} as ${to}/${PREFIX}-${name}:${tag}"
     "${RUNTIME}" run --rm --network host \
       -e REGISTRY_USER -e REGISTRY_TOKEN -e REHEARSAL="${rehearsal}" \
+      -e REGISTRY_HOST="${to%%/*}" \
       --entrypoint sh "${SKOPEO_IMAGE}" \
-      -c 'if [ "${REHEARSAL}" = true ]; then
+      -c 'set -e
+          if [ "${REHEARSAL}" = true ]; then
             set -- --dest-tls-verify=false "$@"
           else
-            set -- --dest-creds "${REGISTRY_USER}:${REGISTRY_TOKEN}" "$@"
+            umask 077
+            printf "%s" "${REGISTRY_TOKEN}" | skopeo login --authfile /tmp/auth.json \
+              --username "${REGISTRY_USER}" --password-stdin "${REGISTRY_HOST}" >/dev/null
+            set -- --dest-authfile /tmp/auth.json "$@"
           fi
           exec skopeo copy --all --preserve-digests --src-tls-verify=false "$@"' \
       publish \
