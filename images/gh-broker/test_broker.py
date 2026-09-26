@@ -32,6 +32,9 @@ cases = [
   (False, "api graphql -f query=mutation{resolveReviewThread(input:{threadId:\"T\"}){thread{id}}x:deleteRepository(input:{repositoryId:\"R\"}){clientMutationId}}"),
   (False, "api graphql -f query=mutation{x:deleteRepository(input:{repositoryId:\"R\"}){clientMutationId}}"),
   (False, "api graphql -f query=mutation{...F}"),
+  (True,  "pr merge 25 --auto -R ivan-pinatti-labs/x"), (True, "pr merge --auto --squash"),
+  (False, "pr merge 25 --admin"), (False, "pr merge 25 --auto --admin=true"),
+  (False, "pr merge https://github.com/evil/x/pull/1 --auto"),
   (False, "auth token"), (False, "repo delete ivan-pinatti-labs/x --yes"), (False, "secret list"), (False, "api user"),
 ]
 # Cases whose arguments hold spaces or newlines, given as argv lists.

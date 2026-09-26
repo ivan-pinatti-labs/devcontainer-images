@@ -8,9 +8,9 @@ Listens on a unix socket. Each connection carries one JSON line:
 The token comes from the GH_TOKEN environment variable, which the host
 passes as a podman secret and which never leaves this container. Refused:
 anything not in /etc/gh-broker/allowlist.json, any repository outside the
-allowed owners, flags that read a file, and every `gh api` write except
-replying to a review comment and the GraphQL mutations the allowlist names
-(resolving a review thread).
+allowed owners, flags that read a file, `pr merge --admin`, and every
+`gh api` write except replying to a review comment and the GraphQL mutations
+the allowlist names (resolving a review thread).
 """
 import json
 import os
@@ -197,12 +197,21 @@ def files_ok(argv):
     return True
 
 
+def merge_ok(argv):
+    # A merge goes through the merge queue, never around it: --admin merges
+    # past the queue and the checks it runs.
+    if argv[:2] != ["pr", "merge"]:
+        return True
+    return not any(a == "--admin" or a.startswith("--admin=") for a in argv)
+
+
 def allowed(argv):
     if not argv:
         return False
     if argv[0] == "api":
         return api_ok(argv)
-    return " ".join(argv[:2]) in COMMANDS and repos_ok(argv) and files_ok(argv)
+    return (" ".join(argv[:2]) in COMMANDS and repos_ok(argv) and files_ok(argv)
+            and merge_ok(argv))
 
 
 def serve(conn):

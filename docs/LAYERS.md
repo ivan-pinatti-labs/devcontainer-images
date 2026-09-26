@@ -64,12 +64,13 @@ The token is a fine grained personal access token for the organization with:
 | --- | --- | --- |
 | Pull requests | read and write | open, comment on and edit pull requests |
 | Issues | read and write | open and comment on issues |
-| Contents | read and write | `gh pr ready`: GitHub requires contents write to take a pull request out of draft, surprising as that is ([cli/cli#6924](https://github.com/cli/cli/discussions/6924)) |
+| Contents | read and write | `gh pr ready` and `gh pr merge --auto`: GitHub requires contents write to take a pull request out of draft, surprising as that is ([cli/cli#6924](https://github.com/cli/cli/discussions/6924)), and to put one in the merge queue |
 | Actions, commit statuses | read | follow checks and read run logs |
 
 Nothing else: no administration, secrets or organization permissions. The
-broker never lets contents write be used for anything but `gh pr ready`: it
-refuses every `gh api` call that is not a GET. Code still reaches GitHub
+broker never lets contents write be used for anything but `gh pr ready` and
+enqueueing a merge: it refuses every `gh api` call that is not a GET, and
+`gh pr merge --admin`, which would skip the queue. Code still reaches GitHub
 only by `git push` over ssh, and `main` only through the merge queue. The
 key's public half is added to your GitHub account as an authentication key.
 
@@ -222,8 +223,10 @@ token or the ssh key, and that L2 holds nothing at all.
 The everyday flow runs entirely from the workbench, for you and for the
 agents alike: `git push` a branch, `gh pr create --draft`, follow the checks
 (`gh pr checks`, `gh run view --log-failed`), then `gh pr ready` once they
-are green, which is what starts CodeRabbit. Merging is left to the
-repository owner.
+are green, which is what starts CodeRabbit. Once the review is answered,
+every thread resolved and the pull request approved, `gh pr merge --auto`
+puts it in the merge queue, which merges it when its own run of the checks
+passes. The broker refuses `--admin`, so nothing merges around the queue.
 
 There is no `gh` binary and no token in the workbench. The `gh` command there
 sends its arguments to the gh broker, which runs the real `gh` with the token
