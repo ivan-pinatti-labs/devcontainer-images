@@ -19,6 +19,9 @@
                 reachable. Default: localhost:5000
     PUBLISH_TO  when set (for example ghcr.io/ivan-pinatti-labs), copy the
                 scanned images there. Needs REGISTRY_USER and REGISTRY_TOKEN.
+                When unset, the same copy is rehearsed into the throwaway
+                registry instead, so a pull request runs the publishing
+                step too, not only main.
     TAGS        extra tags to publish besides the digest, space separated.
                 Default: latest
     SARIF_DIR   where to write one vulnerability report per image, for code
@@ -115,17 +118,27 @@ scan() {
   trivy --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 "${ref}"
 }
 
+# Copy one scanned image, by digest, to TO. The credentials stay in the
+# environment rather than on a command line. The skopeo image's entrypoint is
+# skopeo itself, so the shell is named as the entrypoint. TO is the throwaway
+# registry for a rehearsal, which is plain http and has no credentials.
 publish() {
-  local name="$1" digest="$2" tag
+  local name="$1" digest="$2" to="$3" rehearsal=false tag
+  [ "${to}" = "${STAGING}/rehearsal" ] && rehearsal=true
   for tag in ${TAGS}; do
-    log "publishing ${name} ${digest} as ${PUBLISH_TO}/${PREFIX}-${name}:${tag}"
+    log "publishing ${name} ${digest} as ${to}/${PREFIX}-${name}:${tag}"
     "${RUNTIME}" run --rm --network host \
-      -e REGISTRY_USER -e REGISTRY_TOKEN "${SKOPEO_IMAGE}" \
-      sh -c 'exec skopeo copy --all --preserve-digests \
-        --src-tls-verify=false \
-        --dest-creds "${REGISTRY_USER}:${REGISTRY_TOKEN}" "$0" "$1"' \
+      -e REGISTRY_USER -e REGISTRY_TOKEN -e REHEARSAL="${rehearsal}" \
+      --entrypoint sh "${SKOPEO_IMAGE}" \
+      -c 'if [ "${REHEARSAL}" = true ]; then
+            set -- --dest-tls-verify=false "$@"
+          else
+            set -- --dest-creds "${REGISTRY_USER}:${REGISTRY_TOKEN}" "$@"
+          fi
+          exec skopeo copy --all --preserve-digests --src-tls-verify=false "$@"' \
+      publish \
       "docker://${STAGING}/${PREFIX}-${name}@${digest}" \
-      "docker://${PUBLISH_TO}/${PREFIX}-${name}:${tag}"
+      "docker://${to}/${PREFIX}-${name}:${tag}"
   done
 }
 
@@ -152,11 +165,9 @@ main() {
     scan "${entry%%=*}" "${STAGING}/${PREFIX}-${entry%%=*}@${entry#*=}"
   done
 
-  if [ -n "${PUBLISH_TO}" ]; then
-    for entry in "${digests[@]}"; do
-      publish "${entry%%=*}" "${entry#*=}"
-    done
-  fi
+  for entry in "${digests[@]}"; do
+    publish "${entry%%=*}" "${entry#*=}" "${PUBLISH_TO:-${STAGING}/rehearsal}"
+  done
 
   log "digests"
   printf '%s\n' "${digests[@]}" | tee "${SARIF_DIR}/digests.txt"
