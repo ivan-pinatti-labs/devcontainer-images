@@ -383,6 +383,11 @@ cmd_init() {
     || die "${1:-${PWD}} is not in a git repository"
   files="$(git -C "${top}" ls-files)"
   has() { grep -qE "$1" <<<"${files}"; }
+  # The one step that can fail runs before anything is written, so a failed
+  # init leaves the repository as it found it.
+  if [ ! -e "${top}/.devcontainer/l2/Dockerfile" ]; then
+    l2="$(pull_published l2)" || die "could not pull ${REGISTRY}/airlock-l2; nothing written"
+  fi
   mkdir -p "${top}/.devcontainer/l2"
 
   f="${top}/.devcontainer/egress-sets"
@@ -413,7 +418,6 @@ cmd_init() {
   if [ -e "${f}" ]; then
     echo "workbench: kept ${f}"
   else
-    l2="$(pull_published l2)" || die "could not pull ${REGISTRY}/airlock-l2; nothing written to ${f}"
     cat > "${f}" <<DOCKERFILE
 # This repository's L2 image: where its hooks, tests and package installs
 # run, with the working tree and nothing else (no network, no credentials).
