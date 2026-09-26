@@ -25,8 +25,9 @@ FROM docker.io/dotenvlinter/dotenv-linter:4.0.0@sha256:815fbc7bdd429f5182c349c57
 # what pre-commit does. Go verifies each one against its checksum database
 # as it downloads; that is where the check happens. What is kept is the module
 # cache's download tree, which is a module proxy as it stands. The same
-# installs then run again from that tree alone, offline, in a fresh cache, so
-# a module missing from it fails this build rather than a hook in L2.
+# installs then run again on the same checkouts, from that tree alone and in
+# a fresh cache, with nothing fetched (no clone, GOPROXY off past the tree),
+# so a module missing from it fails this build rather than a hook in L2.
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE} AS go-modules
 # A build stage only; nothing from it runs in L2, and only the module tree is
@@ -44,16 +45,23 @@ COPY go-modules.txt /tmp/go-modules.txt
 RUN set -eu; \
   export GOFLAGS=-modcacherw GOTOOLCHAIN=local; \
   grep -vE '^[[:space:]]*(#|$)' /tmp/go-modules.txt > /tmp/list; \
+  n=0; \
+  while read -r what rev; do \
+    if [ -n "${rev}" ]; then \
+      n=$((n + 1)); \
+      git clone --quiet --depth 1 --branch "${rev}" "${what}" "/tmp/src/${n}"; \
+      echo "/tmp/src/${n}" >> /tmp/checkouts; \
+    else \
+      echo "${what}" >> /tmp/modules; \
+    fi; \
+  done < /tmp/list; \
   install_all() { \
-    while read -r what rev; do \
-      if [ -n "${rev}" ]; then \
-        src="$(mktemp -d)"; \
-        git clone --quiet --depth 1 --branch "${rev}" "${what}" "${src}"; \
-        go -C "${src}" install ./...; \
-      else \
-        go install "${what}"; \
-      fi; \
-    done < /tmp/list; \
+    if [ -f /tmp/checkouts ]; then \
+      while read -r src; do go -C "${src}" install ./...; done < /tmp/checkouts; \
+    fi; \
+    if [ -f /tmp/modules ]; then \
+      while read -r mod; do go install "${mod}"; done < /tmp/modules; \
+    fi; \
   }; \
   GOPATH=/tmp/gopath install_all; \
   out=/usr/local/share/go-modules; \

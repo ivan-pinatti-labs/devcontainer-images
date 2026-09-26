@@ -120,7 +120,8 @@ load_config() {
       WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
-    [ -n "${!key:-}" ] || printf -v "${key}" '%s' "${value}"
+    # Set in the environment, even to nothing, wins over the file.
+    [[ -v "${key}" ]] || printf -v "${key}" '%s' "${value}"
   done < "${CONFIG}"
 }
 load_config
@@ -174,6 +175,17 @@ check_owner() {
     || die "${name} belongs to ${owner}, another folder of the same name; stop it first (host/workbench down ${owner})"
 }
 
+# Whether $1 is a repository's main checkout rather than one of its linked
+# worktrees: its own git directory is the common one. This holds whatever
+# form its .git takes (a directory, or a file for a submodule or a
+# --separate-git-dir clone).
+is_main_checkout() {
+  local own common
+  own="$(git -C "$1" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [ "${own}" = "${common}" ]
+}
+
 workspace() {
   local w="${1:-}" top common
   if [ -z "${w}" ]; then
@@ -189,7 +201,7 @@ workspace() {
   # the checkout you are in: its workspace is then that worktree, and never
   # the main clone, which up would relabel under those containers.
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  if [ -d "${w}/.git" ] && { [ -f "${w}/.devcontainer/workbench-worktree-only" ] \
+  if is_main_checkout "${w}" && { [ -f "${w}/.devcontainer/workbench-worktree-only" ] \
     || { [ -n "${top}" ] && [ -f "${top}/.devcontainer/workbench-worktree-only" ]; }; }; then
     if [ -z "${1:-}" ] && [ -n "${top}" ] && [ "${top}" != "${w}" ]; then
       w="${top}"

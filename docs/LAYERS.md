@@ -56,8 +56,8 @@ Once, on the host:
 ```shell
 podman secret create gh-devcontainer /path/to/a/file/holding/the/token
 ssh-keygen -t ed25519 -C devcontainer -f ~/.ssh/devcontainer/id_ed25519
-mkdir -p ~/.config/workbench
-echo WORKBENCH_GH_OWNERS=<your user or organization> >> ~/.config/workbench/config
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/workbench"
+echo WORKBENCH_GH_OWNERS=<your user or organization> >> "${XDG_CONFIG_HOME:-$HOME/.config}/workbench/config"
 make workbench-pull      # the published images; or make workbench-build
 ```
 
