@@ -1,26 +1,48 @@
-# devcontainer-images
+# devcontainer-airlock
 
-[![License](https://img.shields.io/github/license/ivan-pinatti-labs/devcontainer-images?logo=Github&style=for-the-badge)](LICENSE.md)
-[![GitHub issues](https://img.shields.io/github/issues-raw/ivan-pinatti-labs/devcontainer-images?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-images/issues)
+[![License](https://img.shields.io/github/license/ivan-pinatti-labs/devcontainer-airlock?logo=Github&style=for-the-badge)](LICENSE.md)
+[![GitHub issues](https://img.shields.io/github/issues-raw/ivan-pinatti-labs/devcontainer-airlock?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-airlock/issues)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/ivan-pinatti?logo=Github&style=for-the-badge)](https://github.com/sponsors/ivan-pinatti)
-[![GitHub Repo stars](https://img.shields.io/github/stars/ivan-pinatti-labs/devcontainer-images?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-images)
-[![GitHub forks](https://img.shields.io/github/forks/ivan-pinatti-labs/devcontainer-images?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-images/forks)
-[![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/ivan-pinatti-labs/devcontainer-images?utm_source=oss&utm_medium=github&utm_campaign=ivan-pinatti-labs%2Fdevcontainer-images&labelColor=171717&color=FF570A&label=CodeRabbit+Reviews&style=for-the-badge)](https://coderabbit.ai)
+[![GitHub Repo stars](https://img.shields.io/github/stars/ivan-pinatti-labs/devcontainer-airlock?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-airlock)
+[![GitHub forks](https://img.shields.io/github/forks/ivan-pinatti-labs/devcontainer-airlock?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-airlock/forks)
+[![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/ivan-pinatti-labs/devcontainer-airlock?utm_source=oss&utm_medium=github&utm_campaign=ivan-pinatti-labs%2Fdevcontainer-airlock&labelColor=171717&color=FF570A&label=CodeRabbit+Reviews&style=for-the-badge)](https://coderabbit.ai)
 
-Container images for developing the `ivan-pinatti-labs` repositories, split
-into layers by what each one is trusted with. You and the coding agents work
-in a workbench that holds no GitHub token and no ssh key; hooks, tests and
-package installs run in L2 containers with no network and no credentials; a
-GitHub broker, an ssh-agent and an egress proxy sit beside them, and nothing
-runs on the host but podman. [docs/LAYERS.md](docs/LAYERS.md) explains the
-layers and the daily routine.
+Secure, layered devcontainers for AI coding agents.
+
+Coding agents (Claude Code, Codex) and their editor extensions are powerful
+and trusted with a lot: a GitHub token, an ssh key, the network, and every
+hook, test and `npm install` they run. devcontainer-airlock splits that
+into layers by what each one is trusted with:
+
+- **A workbench per agent**, where you and that agent work. It holds no
+  GitHub token, no ssh key and no other agent's login, and it has no direct
+  network and no container runtime.
+- **L2 containers** for hooks, tests, package installs and throwaway
+  binaries. They get the working tree and nothing else: no network, no
+  credentials.
+- **Beside them**, a GitHub broker that holds the token and runs an allowlist
+  of `gh` commands, an ssh-agent that holds the key, and an egress proxy
+  per workspace that allows only the services a project names.
+
+Nothing runs on the host but podman. [docs/LAYERS.md](docs/LAYERS.md)
+explains the layers, says plainly which parts are a boundary and which are
+only policy the agents are asked to follow, and covers the daily routine.
+
+"devcontainer" here means a development container, not the Dev Containers
+specification: there is no `devcontainer.json`. VS Code attaches to a
+running workbench (**Dev Containers: Attach to Running Container**).
 
 ## Status
 
-The layered images are new and not published yet. The base image published
-today is the previous, single container design;
-[docs/IMAGES.md](docs/IMAGES.md) covers what each image carries and how the
-build works.
+The images are published to
+`ghcr.io/ivan-pinatti-labs/airlock-<name>` and are in daily use for the
+`ivan-pinatti-labs` repositories. Making them easy to adopt in any project
+is in progress: some settings are still specific to that organization (the
+GitHub owners the broker allows, for one). Until 2026-09-26 this repository
+was `devcontainer-images` and the images were
+`ghcr.io/ivan-pinatti-labs/devcontainer-<name>`; those old packages are no
+longer updated. [docs/IMAGES.md](docs/IMAGES.md) covers what each image
+carries and how the build works.
 
 ## Requirements
 

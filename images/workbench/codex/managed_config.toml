@@ -11,7 +11,7 @@ check_for_update_on_startup = false
 # is running and what that means for the commands it runs.
 developer_instructions = """
 You are running in the ivan-pinatti-labs workbench, a container, not on the
-host (docs/LAYERS.md in devcontainer-images has the full picture).
+host (docs/LAYERS.md in devcontainer-airlock has the full picture).
 
 - Do not run project code here. Language runtimes, package managers, test
   runners, pre-commit and scripts from the working tree run in L2 through

@@ -5,7 +5,7 @@ src = open("/usr/local/libexec/gh-broker/broker.py").read()
 ns = {"__name__": "broker"}; exec(compile(src, "broker.py", "exec"), ns)
 allowed = ns["allowed"]
 cases = [
-  (True,  "pr list"), (True, "pr view 25 -R ivan-pinatti-labs/devcontainer-images"),
+  (True,  "pr list"), (True, "pr view 25 -R ivan-pinatti-labs/devcontainer-airlock"),
   (True,  "pr comment https://github.com/ivan-pinatti-labs/gh-actions/pull/1 --body hi"),
   (True,  "api repos/ivan-pinatti-labs/gh-actions"), (True, "api graphql -f query={viewer{login}}"),
   (False, "pr comment https://github.com/someone-else/repo/pull/1 --body spam"),

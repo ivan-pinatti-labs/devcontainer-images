@@ -9,7 +9,7 @@
 #
 # squid rather than tinyproxy: tinyproxy can only match a host name, and
 # checking where the name actually resolves is the point of the ranges.
-ARG BASE_IMAGE=localhost/devcontainer-base:local
+ARG BASE_IMAGE=localhost/airlock-base:local
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 USER 0:0
@@ -27,7 +27,7 @@ COPY sets/ /etc/egress/sets/
 COPY bin/egress-refresh bin/egress-proxy /usr/local/bin/
 RUN install -d -o 1000 -g 1000 /var/lib/egress /run/egress /run/squid
 USER 1000:1000
-LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-images" \
+LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="Egress proxy for the ivan-pinatti-labs workbench: modular allowlists per service, with provider address ranges refreshed automatically." \
       org.opencontainers.image.licenses="Apache-2.0"
 CMD ["egress-proxy"]

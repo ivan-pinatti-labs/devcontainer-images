@@ -2,7 +2,7 @@
 
 You are running in the ivan-pinatti-labs workbench, a container, not on the
 host. What that means for the commands you run (docs/LAYERS.md in
-devcontainer-images has the full picture):
+devcontainer-airlock has the full picture):
 
 - Commands that run project code (language runtimes, package managers, test
   runners, pre-commit, scripts from the working tree) are rewritten by a

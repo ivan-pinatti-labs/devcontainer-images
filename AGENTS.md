@@ -1,4 +1,4 @@
-# devcontainer-images agent instructions
+# devcontainer-airlock agent instructions
 
 Instructions for AI coding agents working in this repository. Claude Code
 reads them through `CLAUDE.md`; Codex and CodeRabbit read this file

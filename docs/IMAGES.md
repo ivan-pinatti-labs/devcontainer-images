@@ -2,8 +2,9 @@
 
 ## What is here
 
-Six images, each built from `images/<name>/Dockerfile` and published as
-`ghcr.io/ivan-pinatti-labs/devcontainer-<name>`. What each one is trusted
+Seven images, each built from `images/<name>/Dockerfile` (the two workbenches
+from `images/workbench/Dockerfile`) and published as
+`ghcr.io/ivan-pinatti-labs/airlock-<name>`. What each one is trusted
 with, and why they are split this way, is in [LAYERS.md](LAYERS.md).
 
 | Image | Built on | Carries |
@@ -33,7 +34,7 @@ what its hooks and tests need on top of the shared L2 image, in
 `.devcontainer/l2/Dockerfile`:
 
 ```dockerfile
-ARG L2_IMAGE=ghcr.io/ivan-pinatti-labs/devcontainer-l2@sha256:<digest>
+ARG L2_IMAGE=ghcr.io/ivan-pinatti-labs/airlock-l2@sha256:<digest>
 FROM ${L2_IMAGE}
 
 USER 0:0
