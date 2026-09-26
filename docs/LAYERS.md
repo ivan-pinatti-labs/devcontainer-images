@@ -78,12 +78,18 @@ key's public half is added to your GitHub account as an authentication key.
 Each day, from the repository you are working on:
 
 ```shell
-host/workbench up        # proxy, broker, ssh-agent, L2 engine (with the current L2 image), both workbenches
-host/workbench unlock    # type the key's passphrase; lasts 8 hours
-host/workbench claude    # Claude Code, in its workbench, in the folder you are in
-host/workbench codex     # the same for Codex
-host/workbench shell claude   # or codex: a plain terminal in that workbench
+make unlock              # type the key's passphrase; lasts 8 hours
+make claude              # Claude Code, in its workbench, in the folder you are in
+make codex               # the same for Codex
+make claude-shell        # or codex-shell: a plain terminal in that workbench
 ```
+
+`make` alone lists the targets, and Tab completes them. They come from
+`host/workbench.mk`, which each repository's Makefile includes, and call
+`host/workbench` (`host/workbench help` has every command). `make claude` and
+`make codex` start the workspace (proxy, broker, ssh-agent, L2 engine with
+the current L2 image, both workbenches) when it is not running;
+`make workbench-up` starts it on its own.
 
 ### One workbench per agent
 

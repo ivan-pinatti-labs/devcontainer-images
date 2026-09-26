@@ -32,11 +32,10 @@ build works.
 ## Usage
 
 ```shell
-host/workbench build    # every image, locally
-host/workbench up       # helpers, L2 engine and both workbenches for this repository
-host/workbench unlock   # the ssh key, for eight hours
-host/workbench claude   # Claude Code in its workbench (or: codex)
-host/workbench shell claude   # a terminal in that workbench (or: codex)
+make workbench-build    # every image, locally
+make unlock             # the ssh key, for eight hours
+make claude             # Claude Code in its workbench, started if needed (or: codex)
+make claude-shell       # a terminal in that workbench (or: codex-shell)
 ```
 
 Or attach VS Code to the running `workbench-claude-<folder>` or
